@@ -4,11 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>VDODesk</title>
+  <link rel="icon" type="image/png" href="/assets/vdodesk-logo.png">
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
   <header>
-    <div class="brand"><span class="logo">V</span><div><strong>VDODesk</strong><small id="version">local editor</small></div></div>
+    <div class="brand"><img class="logo" src="/assets/vdodesk-logo.png" alt="VDODesk logo"><div><strong>VDODesk</strong><small id="version">local editor</small></div></div>
     <div class="project-name"><input id="projectName" value="Untitled project" aria-label="Project name"><span id="saveState">Saved locally</span></div>
     <nav>
       <button data-action="new">New</button><button data-action="open">Open project</button><button data-action="save">Save project</button>
@@ -54,6 +55,7 @@
       <section class="timeline panel">
         <div class="timeline-toolbar">
           <button data-action="undo">↶ Undo</button><button data-action="redo">↷ Redo</button><button data-action="split">Split</button>
+          <button data-action="move-earlier" title="Move selected V1 clip one position earlier">← Earlier</button><button data-action="move-later" title="Move selected V1 clip one position later">Later →</button>
           <button data-action="freeze">Freeze frame</button><button data-action="duplicate">Duplicate</button><button data-action="delete">Delete</button>
           <button data-action="record" id="recordButton">● Voiceover</button><label><input id="proxyToggle" type="checkbox" checked> Proxy playback</label>
           <span id="timelineSummary"></span>
@@ -70,7 +72,7 @@
       <div class="panel-title"><strong>Inspector</strong><span id="selectionLabel">No selection</span></div>
       <div class="tabs" id="inspectorTabs">
         <button class="active" data-tab="clip">Clip</button><button data-tab="transform">Transform</button><button data-tab="color">Color</button>
-        <button data-tab="motion">Motion</button><button data-tab="audio">Audio</button><button data-tab="ai">Track</button><button data-tab="project">Project</button>
+        <button data-tab="filters">Filters</button><button data-tab="motion">Motion</button><button data-tab="audio">Audio</button><button data-tab="ai">Track</button><button data-tab="project">Project</button>
       </div>
       <div id="inspectorBody"></div>
     </aside>

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0-beta.1
+
+- Added numbered V1 video sequencing with drag-to-reorder and explicit Earlier/Later controls.
+- Added nine creative selected-clip filters plus None, with adjustable intensity and live/export parity.
+- Added a new transparent VDODesk logo to the app header, favicon, documentation and distribution.
+- Added filter-chain regression coverage for every preset.
+
 ## 1.0.0-beta.1
 
 - Completed the original 0.4.0 pending-feature implementation in the retained browser/Python/FFmpeg architecture.

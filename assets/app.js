@@ -10,19 +10,32 @@ const formatTime = seconds => {
   const hours = Math.floor(seconds / 3600), minutes = Math.floor(seconds % 3600 / 60), secs = Math.floor(seconds % 60), frames = Math.floor(seconds % 1 * project.fps);
   return [hours, minutes, secs].map(value => String(value).padStart(2,"0")).join(":") + "." + String(frames).padStart(2,"0");
 };
+const FILTER_PRESETS = [
+  {id:"none",name:"None",description:"Original image"},
+  {id:"cinematic",name:"Cinematic",description:"Balanced teal and warmth"},
+  {id:"warm",name:"Warm",description:"Golden highlights"},
+  {id:"cool",name:"Cool",description:"Clean blue tone"},
+  {id:"vintage",name:"Vintage",description:"Faded film color"},
+  {id:"mono",name:"Mono",description:"Neutral black and white"},
+  {id:"noir",name:"Noir",description:"High-contrast monochrome"},
+  {id:"vivid",name:"Vivid",description:"Punchy color"},
+  {id:"soft",name:"Soft",description:"Gentle low contrast"},
+  {id:"teal_orange",name:"Teal & Orange",description:"Stylized split tone"},
+];
+const filterPreset = id => FILTER_PRESETS.find(item=>item.id===id)||FILTER_PRESETS[0];
 const defaultClip = media => ({
   id: uid(), file: media.file, name: media.name, kind: media.kind === "image" ? "freeze" : "video",
   track: 0, timelineStart: 0, start: 0, end: media.duration || 3, duration: media.kind === "image" ? 3 : undefined,
   speed: 1, reverse: false, transition: "none", transitionDuration: .5,
   volume: 1, mute: false, brightness: 0, contrast: 1, saturation: 1, gamma: 1,
-  temperature: 0, tint: 0, hue: 0, shadows: 0, highlights: 0, lut: "",
+  temperature: 0, tint: 0, hue: 0, shadows: 0, highlights: 0, lut: "", filter: "none", filterIntensity: 1,
   crop: {x:0,y:0,w:1,h:1}, zoom: 1, focusX: .5, focusY: .5, scale: .45,
   positionX: .5, positionY: .5, rotation: 0, mirrorH: false, mirrorV: false,
   stabilize: false, stabilizeStrength: 12, opacity: 1, anchorText: "", tracking: null,
   keyframes: {}
 });
 const freshProject = () => ({
-  version: "1.0.0-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
+  version: "1.1.0-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
   watermarkOpacity: .55, imageWatermark: {file:"",opacity:.7,scale:.2,x:.8,y:.08}, safeArea: false,
   clips: [], audio: "", musicVolume: .5, voiceovers: [], audioDucking: true,
   export: {container:"mp4",codec:"h264",width:"",height:"",quality:20,hardware:true,pcmAudio:false}
@@ -106,7 +119,9 @@ function timelineItems(track,map,scale){
 }
 function clipHtml(clip,layout,scale,kind){
   const transition=clip.transition!=="none"?`<span class="transition-badge">${escapeHtml(clip.transition)}</span>`:"";
-  return `<div class="clip ${kind} ${selectedClipId===clip.id?"selected":""}" draggable="true" data-clip="${clip.id}" style="left:${layout.start*scale}px;width:${Math.max(20,layout.duration*scale)}px"><canvas class="waveform" data-waveform="${escapeHtml(clip.file)}"></canvas><span class="trim left"></span><span class="clip-name">${escapeHtml(clip.name)}</span>${transition}<span class="trim right"></span></div>`;
+  const sequence=Number(clip.track)===0?primaryClips().findIndex(item=>item.id===clip.id)+1:0;
+  const preset=filterPreset(clip.filter),filterBadge=preset.id!=="none"?`<span class="filter-badge">${escapeHtml(preset.name)}</span>`:"";
+  return `<div class="clip ${kind} ${selectedClipId===clip.id?"selected":""}" data-clip="${clip.id}" title="${sequence?"Drag horizontally to rearrange this sequence":"Drag to position overlay"}" style="left:${layout.start*scale}px;width:${Math.max(20,layout.duration*scale)}px"><canvas class="waveform" data-waveform="${escapeHtml(clip.file)}"></canvas><span class="trim left"></span><span class="clip-name">${sequence?`<span class="sequence-number">${sequence}</span>`:""}${escapeHtml(clip.name)}</span>${transition}${filterBadge}<span class="trim right"></span></div>`;
 }
 function voiceHtml(voice,layout,scale){return `<div class="clip voice ${selectedVoiceoverId===voice.id?"selected":""}" data-voice="${voice.id}" style="left:${layout.start*scale}px;width:${Math.max(20,layout.duration*scale)}px"><span class="clip-name">● ${escapeHtml(voice.name||"Voiceover")}</span></div>`;}
 async function drawWaveforms(){
@@ -134,6 +149,14 @@ function renderInspector(){
   else if(inspectorTab==="ai"){
     const tracking=clip.tracking||{};body.innerHTML=`<div class="section"><h3>Subject tracking & mask</h3><div class="notice">Analyze through the clip, then correct the first-frame box manually if needed. The tracked path drives smart reframe and anchored text.</div><button data-action="analyze">Track subject</button> <button data-action="manual-track">Use manual box</button>${tracking.engine?`<p class="hint">${escapeHtml(tracking.engine)}${tracking.path?.length?` · ${tracking.path.length} samples`:""}</p>`:""}${rangeField("Box X","tracking.box.x",0,1,.01,tracking.box?.x??.2)}${rangeField("Box Y","tracking.box.y",0,1,.01,tracking.box?.y??.15)}${rangeField("Box width","tracking.box.w",.05,1,.01,tracking.box?.w??.6)}${rangeField("Box height","tracking.box.h",.05,1,.01,tracking.box?.h??.7)}${checkField("Draw tracked object outline","tracking.outline",tracking.outline)}<button data-action="smart-reframe">Smart reframe</button>${inputField("Anchored text","anchorText",clip.anchorText,"text",'maxlength="120"')} ${tracking.maskUrl?'<label class="check"><input id="showMask" type="checkbox"> Preview segmentation mask</label>':""}</div>`;
   } else body.innerHTML=projectInspector();
+  if(inspectorTab==="clip"&&Number(clip.track)===0){
+    const sequence=primaryClips(),position=sequence.findIndex(item=>item.id===clip.id)+1;
+    body.insertAdjacentHTML("afterbegin",`<div class="section"><h3>Video sequence</h3><div class="notice">Clip ${position} of ${sequence.length}. Drag it along V1 or use the buttons to change playback order.</div><div class="row"><button data-action="move-earlier" ${position<=1?"disabled":""}>← Move earlier</button><button data-action="move-later" ${position>=sequence.length?"disabled":""}>Move later →</button></div></div>`);
+  }
+  if(inspectorTab==="filters"){
+    const selected=filterPreset(clip.filter);
+    body.innerHTML=`<div class="section"><h3>Clip filter</h3><div class="notice">Filters apply only to the selected clip and are included in preview renders and final exports.</div><div class="filter-grid">${FILTER_PRESETS.map(preset=>`<button class="filter-preset filter-${preset.id} ${selected.id===preset.id?"active":""}" data-filter="${preset.id}"><strong>${escapeHtml(preset.name)}</strong><small>${escapeHtml(preset.description)}</small></button>`).join("")}</div></div><div class="section"><h3>Filter strength</h3>${rangeField("Intensity","filterIntensity",0,1,.01,clip.filterIntensity??1)}<button data-action="reset-filter">Remove filter</button></div>`;
+  }
   body.querySelectorAll("input[data-prop],select[data-prop]").forEach(control=>{control.addEventListener("input",inspectorInput);control.addEventListener("change",inspectorChange)});
   applyPreviewEffects();
 }
@@ -152,6 +175,21 @@ function inspectorInput(event){
 }
 function inspectorChange(event){if(!event.currentTarget.dataset.undoCaptured)inspectorInput(event);delete event.currentTarget.dataset.undoCaptured;renderInspector();}
 
+function previewFilterCss(id,intensity){
+  const i=clamp(intensity,0,1);
+  if(!i||id==="none")return "";
+  if(id==="cinematic")return ` contrast(${1+.14*i}) saturate(${1+.08*i}) sepia(${.08*i}) hue-rotate(${-10*i}deg)`;
+  if(id==="warm")return ` brightness(${1+.03*i}) saturate(${1+.10*i}) sepia(${.22*i}) hue-rotate(${-12*i}deg)`;
+  if(id==="cool")return ` contrast(${1+.05*i}) sepia(${.12*i}) hue-rotate(${175*i}deg) saturate(${1+.06*i})`;
+  if(id==="vintage")return ` sepia(${.42*i}) saturate(${1-.28*i}) contrast(${1-.07*i}) brightness(${1+.04*i})`;
+  if(id==="mono")return ` grayscale(${i})`;
+  if(id==="noir")return ` grayscale(${i}) contrast(${1+.42*i}) brightness(${1-.07*i})`;
+  if(id==="vivid")return ` saturate(${1+.55*i}) contrast(${1+.12*i})`;
+  if(id==="soft")return ` contrast(${1-.12*i}) saturate(${1-.08*i}) brightness(${1+.06*i})`;
+  if(id==="teal_orange")return ` sepia(${.18*i}) hue-rotate(${150*i}deg) saturate(${1+.24*i}) contrast(${1+.08*i})`;
+  return "";
+}
+
 function applyPreviewEffects(){
   const clip=selectedClip(); const imageMode=clip?.kind==="freeze"; preview.style.display=imageMode?"none":"block";stillPreview.style.display=imageMode?"block":"none";
   if(clip){
@@ -161,7 +199,7 @@ function applyPreviewEffects(){
     // authoritative. Every inspector control still produces an immediate and
     // visible preview response instead of appearing inert.
     const brightness=clamp(rawBrightness*(1+(gamma-1)*.22+(shadows+highlights)/900),.05,4),contrast=clamp(rawContrast*(1+(highlights-shadows)/700),.05,5),colorStrength=clamp((Math.abs(temp)+Math.abs(tint))/260,0,.7),colorAngle=hue+(temp<0?185:-12)+(tint>=0?-35:75);
-    const filter=`brightness(${brightness}) contrast(${contrast}) saturate(${saturation}) sepia(${colorStrength}) hue-rotate(${colorStrength?colorAngle:hue}deg)`;
+    const filter=`brightness(${brightness}) contrast(${contrast}) saturate(${saturation}) sepia(${colorStrength}) hue-rotate(${colorStrength?colorAngle:hue}deg)${previewFilterCss(clip.filter,clip.filterIntensity??1)}`;
     const sx=clip.mirrorH?-1:1,sy=clip.mirrorV?-1:1,overlay=Number(clip.track)>0,baseScale=overlay?Number(clip.scale):1;const transform=`scale(${sx*zoom*baseScale},${sy*zoom*baseScale}) rotate(${clip.rotation}deg)`;
     const crop=clip.crop||{x:0,y:0,w:1,h:1},clipPath=`inset(${clamp(crop.y,0,1)*100}% ${clamp(1-crop.x-crop.w,0,1)*100}% ${clamp(1-crop.y-crop.h,0,1)*100}% ${clamp(crop.x,0,1)*100}%)`;
     for(const element of [preview,stillPreview]){element.style.filter=filter;element.style.transform=transform;element.style.transformOrigin=`${focusX*100}% ${focusY*100}%`;element.style.opacity=clip.opacity;element.style.clipPath=clipPath;element.style.left=overlay?`${(clip.positionX-.5)*100}%`:"0";element.style.top=overlay?`${(clip.positionY-.5)*100}%`:"0";}
@@ -204,6 +242,16 @@ function playTick(){
   renderTimeline();updateTimecode();if(isPlayingTimeline)requestAnimationFrame(playTick);
 }
 
+function movePrimaryClip(clip,offset){
+  if(!clip||Number(clip.track)!==0)return toast("Select a clip on the V1 sequence");
+  const sequence=primaryClips(),from=sequence.indexOf(clip),to=from+offset;
+  if(to<0||to>=sequence.length)return toast(offset<0?"Clip is already first":"Clip is already last");
+  const other=sequence[to],fromIndex=project.clips.indexOf(clip),toIndex=project.clips.indexOf(other);
+  pushChange(()=>{[project.clips[fromIndex],project.clips[toIndex]]=[project.clips[toIndex],project.clips[fromIndex]]});
+  const layout=timelineLayout().map.get(clip.id);if(layout)seekTimeline(layout.start);
+  toast(`Moved to sequence position ${to+1}`);
+}
+
 function action(name){
   const clip=selectedClip(),layout=clip&&timelineLayout().map.get(clip.id);
   if(name==="import")return $("#mediaFiles").click();
@@ -213,10 +261,12 @@ function action(name){
   if(name==="play")return togglePlay();if(name==="timeline-start")return seekTimeline(0);if(name==="timeline-end")return seekTimeline(timelineLayout().total-1/project.fps);if(name==="clip-start"&&layout)return seekTimeline(layout.start);if(name==="clip-end"&&layout)return seekTimeline(layout.start+layout.duration-1/project.fps);if(name==="step-back")return seekTimeline(playheadTime-1/project.fps);if(name==="step-forward")return seekTimeline(playheadTime+1/project.fps);
   if(name==="delete"&&clip)return pushChange(()=>{project.clips=project.clips.filter(c=>c.id!==clip.id);selectedClipId=project.clips[0]?.id||""});
   if(name==="duplicate"&&clip)return pushChange(()=>{const copy=structuredClone(clip);copy.id=uid();copy.name+=" copy";if(copy.track>0)copy.timelineStart+=.25;project.clips.splice(project.clips.indexOf(clip)+1,0,copy);selectedClipId=copy.id});
+  if(name==="move-earlier")return movePrimaryClip(clip,-1);if(name==="move-later")return movePrimaryClip(clip,1);
   if(name==="split"&&clip&&clip.kind!=="freeze"&&layout){const sourceAt=clip.start+(playheadTime-layout.start)*clip.speed;if(sourceAt<=clip.start+.05||sourceAt>=clip.end-.05)return toast("Move the playhead inside the selected clip");pushChange(()=>{const copy=structuredClone(clip);copy.id=uid();copy.start=sourceAt;copy.name+=" B";clip.end=sourceAt;project.clips.splice(project.clips.indexOf(clip)+1,0,copy);selectedClipId=copy.id});return}
   if(name==="freeze"&&clip)return createFreeze(clip);if(name==="record")return toggleRecording();if(name==="relink")return selectedMediaFile?$("#relinkFile").click():toast("Select a media file first");
   if(name==="remove-voice"&&selectedVoiceoverId)return pushChange(()=>{project.voiceovers=project.voiceovers.filter(voice=>voice.id!==selectedVoiceoverId);selectedVoiceoverId=""});
   if(name==="reset-color"&&clip)return pushChange(()=>Object.assign(clip,{brightness:0,contrast:1,saturation:1,gamma:1,temperature:0,tint:0,hue:0,shadows:0,highlights:0,lut:""}));
+  if(name==="reset-filter"&&clip)return pushChange(()=>Object.assign(clip,{filter:"none",filterIntensity:1}));
   if(name==="clear-keyframes"&&clip)return pushChange(()=>clip.keyframes={});if(name==="clear-music")return pushChange(()=>project.audio="");
   if(name==="analyze"&&clip)return analyze(clip,false);if(name==="manual-track"&&clip)return analyze(clip,true);if(name==="smart-reframe"&&clip){if(!clip.tracking?.focus)return toast("Analyze or define a subject first");return pushChange(()=>{const path=clip.tracking.path||[],first=path[0]||clip.tracking.focus,last=path.at(-1)||first;clip.focusX=first.x;clip.focusY=first.y;clip.zoom=Math.max(1,Math.min(3,.72/Math.max(clip.tracking.box.w,clip.tracking.box.h)));clip.keyframes.focusXEnd=last.x;clip.keyframes.focusYEnd=last.y;clip.keyframes.zoomEnd=clip.zoom});}
   if(name==="recover"){const saved=localStorage.getItem("vdodesk.autosave");saved?restore(saved):toast("No recovery snapshot found");return}if(name==="recover-previous"){const saved=localStorage.getItem("vdodesk.recovery.previous");saved?restore(saved):toast("No previous-project snapshot found");return}if(name==="clear-recovery"){localStorage.removeItem("vdodesk.autosave");localStorage.removeItem("vdodesk.recovery.previous");toast("Recovery snapshots cleared");return}
@@ -239,6 +289,7 @@ function blobDuration(blob){return new Promise(resolve=>{const audio=document.cr
 
 document.addEventListener("click",event=>{
   const actionNode=event.target.closest("[data-action]");if(actionNode){event.preventDefault();action(actionNode.dataset.action);return}
+  const filterNode=event.target.closest("[data-filter]");if(filterNode){event.preventDefault();const clip=selectedClip();if(clip)pushChange(()=>{clip.filter=filterNode.dataset.filter;clip.filterIntensity=clip.filterIntensity??1});return}
   const add=event.target.closest("[data-add]");if(add){event.stopPropagation();addMediaToTimeline(mediaByFile(add.dataset.add));return}
   const card=event.target.closest("[data-media]");if(card){selectedMediaFile=card.dataset.media;renderLibrary();return}
   const voiceNode=event.target.closest("[data-voice]");if(voiceNode){selectedVoiceoverId=voiceNode.dataset.voice;inspectorTab="audio";playheadTime=Number(selectedVoiceover()?.start)||0;renderTimeline();renderInspector();updateTimecode();return}

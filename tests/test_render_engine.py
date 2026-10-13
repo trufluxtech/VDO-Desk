@@ -46,6 +46,27 @@ class RenderEngineTests(unittest.TestCase):
         self.assertEqual(("mp4", "h264", "libx264"),
                          render_engine.final_codec({"export": {"container": "invalid", "codec": "invalid"}}, capabilities))
 
+    def test_all_clip_filter_presets_build_ffmpeg_chains(self):
+        presets = {"cinematic", "warm", "cool", "vintage", "mono", "noir", "vivid", "soft", "teal_orange"}
+        for preset in presets:
+            with self.subTest(preset=preset):
+                self.assertTrue(render_engine.clip_filter_chain({"filter": preset, "filterIntensity": .65}))
+        self.assertEqual([], render_engine.clip_filter_chain({"filter": "none", "filterIntensity": 1}))
+        self.assertEqual([], render_engine.clip_filter_chain({"filter": "vivid", "filterIntensity": 0}))
+        self.assertEqual([], render_engine.clip_filter_chain({"filter": "untrusted", "filterIntensity": 1}))
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg is required")
+    def test_all_clip_filter_presets_execute_in_ffmpeg(self):
+        presets = {"cinematic", "warm", "cool", "vintage", "mono", "noir", "vivid", "soft", "teal_orange"}
+        for preset in presets:
+            with self.subTest(preset=preset):
+                chain = render_engine.clip_filter_chain({"filter": preset, "filterIntensity": .65})
+                subprocess.run([
+                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                    "testsrc2=size=64x36:rate=5:duration=0.2", "-vf", ",".join(chain),
+                    "-frames:v", "1", "-f", "null", "-",
+                ], check=True, capture_output=True)
+
     @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg is required")
     def test_real_render_applies_edits_and_audio(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -99,7 +120,7 @@ class RenderEngineTests(unittest.TestCase):
                 "mute": True, "brightness": .22, "contrast": 1.35, "saturation": .55,
                 "gamma": 1.4, "temperature": 35, "tint": -18, "hue": 12,
                 "shadows": 25, "highlights": -20, "zoom": 1.18,
-                "rotation": 3, "mirrorH": True,
+                "rotation": 3, "mirrorH": True, "filter": "cinematic", "filterIntensity": .75,
             })
             edited, _ = render_engine.render_project("edited", edited_spec, root, root, lambda *_: None)
             loud_spec = copy.deepcopy(base_spec)

@@ -21,7 +21,7 @@ from media_services import (
 from render_engine import number, render_project, safe_name
 
 
-VERSION = "1.0.0-beta.1"
+VERSION = "1.1.0-beta.1"
 ROOT = Path(__file__).resolve().parents[1]
 PROJECTS = ROOT / "projects"
 MEDIA = PROJECTS / "media"
@@ -273,6 +273,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.serve_file(ROOT / "assets" / "app.js")
         if path == "/assets/styles.css":
             return self.serve_file(ROOT / "assets" / "styles.css")
+        if path == "/assets/vdodesk-logo.png":
+            return self.serve_file(ROOT / "assets" / "vdodesk-logo.png")
         roots = (("/media/", MEDIA), ("/proxies/", PROXIES), ("/analysis/", ANALYSIS), ("/exports/", OUTPUT))
         for prefix, root in roots:
             if path.startswith(prefix):

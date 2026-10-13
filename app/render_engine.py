@@ -75,6 +75,51 @@ def atempo_filters(speed):
     return filters
 
 
+def clip_filter_chain(clip):
+    """Return deterministic FFmpeg filters for a selected clip preset."""
+    preset = str(clip.get("filter") or "none").lower()
+    strength = number(clip.get("filterIntensity"), 0, 1, 1)
+    if preset == "none" or strength <= .0001:
+        return []
+    if preset == "cinematic":
+        return [
+            f"eq=contrast={1 + .14 * strength:.6f}:saturation={1 + .08 * strength:.6f}",
+            f"colorbalance=rs={-.08 * strength:.6f}:bs={.10 * strength:.6f}:rh={.10 * strength:.6f}:bh={-.08 * strength:.6f}",
+        ]
+    if preset == "warm":
+        return [
+            f"colorbalance=rs={.14 * strength:.6f}:gs={.04 * strength:.6f}:bs={-.10 * strength:.6f}",
+            f"eq=brightness={.02 * strength:.6f}:saturation={1 + .10 * strength:.6f}",
+        ]
+    if preset == "cool":
+        return [
+            f"colorbalance=rs={-.08 * strength:.6f}:gs={-.02 * strength:.6f}:bs={.14 * strength:.6f}",
+            f"eq=contrast={1 + .05 * strength:.6f}:saturation={1 + .04 * strength:.6f}",
+        ]
+    if preset == "vintage":
+        return [
+            f"colorbalance=rs={.10 * strength:.6f}:gs={.03 * strength:.6f}:bs={-.08 * strength:.6f}",
+            f"eq=brightness={.03 * strength:.6f}:contrast={1 - .08 * strength:.6f}:saturation={1 - .30 * strength:.6f}",
+        ]
+    if preset == "mono":
+        return [f"hue=s={1 - strength:.6f}"]
+    if preset == "noir":
+        return [
+            f"hue=s={1 - strength:.6f}",
+            f"eq=brightness={-.06 * strength:.6f}:contrast={1 + .42 * strength:.6f}",
+        ]
+    if preset == "vivid":
+        return [f"eq=contrast={1 + .12 * strength:.6f}:saturation={1 + .55 * strength:.6f}"]
+    if preset == "soft":
+        return [f"eq=brightness={.05 * strength:.6f}:contrast={1 - .12 * strength:.6f}:saturation={1 - .08 * strength:.6f}"]
+    if preset == "teal_orange":
+        return [
+            f"colorbalance=rs={-.10 * strength:.6f}:bs={.14 * strength:.6f}:rh={.16 * strength:.6f}:gh={.04 * strength:.6f}:bh={-.12 * strength:.6f}",
+            f"eq=contrast={1 + .08 * strength:.6f}:saturation={1 + .18 * strength:.6f}",
+        ]
+    return []
+
+
 def render_piece(clip, index, source, target, width, height, fps, temp, overlay=False):
     still = clip.get("kind") == "freeze" or source.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
     duration = clip_duration(clip, source)
@@ -150,6 +195,7 @@ def render_piece(clip, index, source, target, width, height, fps, temp, overlay=
         f"saturation='{saturation0:.6f}+({saturation1-saturation0:.6f})*{progress}':"
         f"gamma='{gamma0:.6f}+({gamma1-gamma0:.6f})*{progress}':eval=frame"
     )
+    vf += clip_filter_chain(clip)
     lut_name = safe_name(clip.get("lut"))
     if lut_name:
         lut_path = source.parent / lut_name

@@ -1,4 +1,6 @@
-# VDODesk 1.0.0 beta 1
+# VDODesk 1.1.0 beta 1
+
+<img src="assets/vdodesk-logo.png" alt="VDODesk logo" width="96">
 
 VDODesk is a local-first video editor built with the existing project architecture: a browser UI, a Python standard-library server, and FFmpeg/FFprobe for authoritative media processing. It listens only on `127.0.0.1`, has no account or analytics, and never modifies imported source files.
 
@@ -15,10 +17,11 @@ Windows: install Python and FFmpeg on `PATH`, then run `START_WINDOWS.bat`. Opti
 
 ## Implemented editor features
 
-- Magnetic V1 timeline, V2/V3 overlay tracks, source-audio and voiceover lanes; drag to reorder/move, drag either edge to trim, split, duplicate, freeze frame, undo/redo, click/drag scrubbing and frame-step.
+- Magnetic V1 timeline with numbered video sequencing, drag-to-reorder plus explicit Earlier/Later controls, V2/V3 overlay tracks, source-audio and voiceover lanes; drag either edge to trim, split, duplicate, freeze frame, undo/redo, click/drag scrubbing and frame-step.
 - Cross dissolve, fade, wipe, slide and zoom transitions with adjustable duration.
 - Crop, overlay positioning/scaling, rotation, zoom, mirror, opacity, stabilization and focal-point controls.
 - Brightness, contrast, saturation, gamma, temperature, tint, hue, shadows/highlights and `.cube` 3D LUT support.
+- Ten selected-clip filter presets with adjustable intensity: None, Cinematic, Warm, Cool, Vintage, Mono, Noir, Vivid, Soft and Teal & Orange. Filters affect the live preview, preview renders and exports.
 - Linear end keyframes for zoom, focal position, color controls and audio gain.
 - Subject detection, multi-sample template tracking, GrabCut segmentation mask with manual correction, smart reframing, tracked outline and anchored text. OpenCV activates automated analysis; manual fallback is always available.
 - Opening title, text watermark, draggable image watermark, safe-area guides and all five planned aspect-ratio presets.
@@ -50,6 +53,6 @@ The live browser preview is designed for responsive editing and visibly approxim
 
 ## Validation and limitations
 
-Run `python3 -m unittest discover -s tests -v` to exercise workspace persistence, waveforms, proxies, freeze frames, tracking fallbacks, color/effect rendering, audio gain/mute, transitions, overlays, titles, watermarks, voiceover ducking and export compatibility. VDODesk is a feature-complete beta, not a signed/notarized macOS application. Very large/high-resolution projects remain bounded by local RAM, storage and FFmpeg performance. Stabilization is FFmpeg `deshake`; tracking uses efficient sampled template tracking rather than a cloud AI service. Test short exports before committing important footage.
+Run `python3 -m unittest discover -s tests -v` to exercise workspace persistence, waveforms, proxies, freeze frames, tracking fallbacks, clip filters, color/effect rendering, audio gain/mute, transitions, overlays, titles, watermarks, voiceover ducking and export compatibility. VDODesk is a feature-complete beta, not a signed/notarized macOS application. Very large/high-resolution projects remain bounded by local RAM, storage and FFmpeg performance. Stabilization is FFmpeg `deshake`; tracking uses efficient sampled template tracking rather than a cloud AI service. Test short exports before committing important footage.
 
 Distribution requires an independent review of FFmpeg codec/patent licensing, third-party component licenses, security hardening and Apple notarization requirements.
