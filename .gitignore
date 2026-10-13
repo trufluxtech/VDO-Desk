@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.venv/
+.DS_Store
+projects/media/*
+projects/exports/*
+projects/proxies/*
+projects/analysis/*
+!projects/.keep
