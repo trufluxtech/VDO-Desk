@@ -1,0 +1,3 @@
+# Optional: enables OpenCV subject detection, tracking and segmentation masks.
+# The editor and manual tracking controls work without it.
+opencv-python>=4.10,<5

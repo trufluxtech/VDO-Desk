@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>VDODesk</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="logo">V</span><div><strong>VDODesk</strong><small id="version">local editor</small></div></div>
+    <div class="project-name"><input id="projectName" value="Untitled project" aria-label="Project name"><span id="saveState">Saved locally</span></div>
+    <nav>
+      <button data-action="new">New</button><button data-action="open">Open project</button><button data-action="save">Save project</button>
+      <button data-action="preview" class="accent-soft">Render preview</button><button data-action="export" class="accent">Export</button>
+      <input id="projectFile" type="file" accept="application/json" hidden>
+    </nav>
+  </header>
+
+  <main>
+    <aside class="library panel">
+      <div class="panel-title"><strong>Media</strong><button data-action="import">＋ Import</button></div>
+      <input id="mediaFiles" type="file" accept="video/*,audio/*,image/*,.cube" multiple hidden>
+      <div id="dropZone" class="drop">Drop media, images or LUTs here</div>
+      <div class="library-tabs"><button class="active" data-library="project">Project</button><button data-library="recent">Recent 10</button></div>
+      <div id="mediaList" class="media-list"></div>
+      <div class="library-footer"><button data-action="relink">Relink selected…</button><input id="relinkFile" type="file" hidden></div>
+    </aside>
+
+    <section class="workspace">
+      <div class="viewer panel">
+        <div class="stage-wrap">
+          <div id="stage" class="stage ratio-16-9">
+            <video id="preview" playsinline></video>
+            <img id="stillPreview" alt="">
+            <div id="safeArea" class="safe-area"></div>
+            <div id="subjectBox" class="subject-box"></div>
+            <img id="maskPreview" class="mask-preview" alt="">
+            <div id="titleOverlay" class="title-overlay"></div>
+            <div id="textWatermark" class="text-watermark"></div>
+            <img id="imageWatermark" class="image-watermark" alt="">
+            <div id="anchorOverlay" class="anchor-overlay"></div>
+          </div>
+        </div>
+        <div class="transport">
+          <button data-action="timeline-start" title="Timeline start">|◀</button><button data-action="clip-start" title="Clip start">◀|</button>
+          <button data-action="step-back" title="Previous frame">‹</button><button data-action="play" id="playButton">▶</button>
+          <button data-action="step-forward" title="Next frame">›</button><button data-action="clip-end" title="Clip end">|▶</button><button data-action="timeline-end" title="Timeline end">▶|</button>
+          <span id="timecode">00:00:00.00 / 00:00:00.00</span>
+          <label>Zoom <input id="timelineZoom" type="range" min="45" max="220" value="92"></label>
+        </div>
+      </div>
+
+      <section class="timeline panel">
+        <div class="timeline-toolbar">
+          <button data-action="undo">↶ Undo</button><button data-action="redo">↷ Redo</button><button data-action="split">Split</button>
+          <button data-action="freeze">Freeze frame</button><button data-action="duplicate">Duplicate</button><button data-action="delete">Delete</button>
+          <button data-action="record" id="recordButton">● Voiceover</button><label><input id="proxyToggle" type="checkbox" checked> Proxy playback</label>
+          <span id="timelineSummary"></span>
+        </div>
+        <div class="timeline-scroll">
+          <div id="ruler" class="ruler"></div>
+          <div id="tracks" class="tracks"></div>
+          <div id="playhead" class="playhead"></div>
+        </div>
+      </section>
+    </section>
+
+    <aside class="inspector panel">
+      <div class="panel-title"><strong>Inspector</strong><span id="selectionLabel">No selection</span></div>
+      <div class="tabs" id="inspectorTabs">
+        <button class="active" data-tab="clip">Clip</button><button data-tab="transform">Transform</button><button data-tab="color">Color</button>
+        <button data-tab="motion">Motion</button><button data-tab="audio">Audio</button><button data-tab="ai">Track</button><button data-tab="project">Project</button>
+      </div>
+      <div id="inspectorBody"></div>
+    </aside>
+  </main>
+
+  <div id="toast" role="status"></div>
+  <dialog id="exportDialog">
+    <form method="dialog">
+      <div class="dialog-title"><strong>Export video</strong><button value="cancel">×</button></div>
+      <div class="export-grid">
+        <label>Container<select id="exportContainer"><option>mp4</option><option>mov</option><option>webm</option></select></label>
+        <label>Codec<select id="exportCodec"><option value="h264">H.264</option><option value="h265">H.265 / HEVC</option><option value="vp9">VP9</option></select></label>
+        <label>Width<input id="exportWidth" type="number" min="240" max="7680" step="2" placeholder="preset"></label>
+        <label>Height<input id="exportHeight" type="number" min="240" max="4320" step="2" placeholder="preset"></label>
+        <label>Quality (lower is better)<input id="exportQuality" type="number" min="14" max="45" value="20"></label>
+        <label><input id="hardwareExport" type="checkbox" checked> Hardware encode when available</label>
+        <label><input id="pcmAudio" type="checkbox"> PCM audio (MOV)</label>
+      </div>
+      <div id="capabilities" class="hint"></div>
+      <div class="dialog-actions"><button value="cancel">Cancel</button><button id="startExport" value="default" class="accent">Start export</button></div>
+    </form>
+  </dialog>
+  <script src="/assets/app.js"></script>
+</body>
+</html>
