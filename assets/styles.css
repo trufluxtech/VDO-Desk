@@ -22,3 +22,4 @@ main{height:calc(100% - 56px);display:grid;grid-template-columns:240px minmax(52
 .filter-vintage{--swatch:linear-gradient(150deg,#d2b47b,#6f5139)}.filter-mono{--swatch:linear-gradient(150deg,#eee,#444)}
 .filter-noir{--swatch:linear-gradient(150deg,#fff 0 42%,#090909 43%)}.filter-vivid{--swatch:linear-gradient(150deg,#ff4e91,#ffd443 50%,#20d9c5)}
 .filter-soft{--swatch:linear-gradient(150deg,#f6dbed,#b7d8ef)}.filter-teal_orange{--swatch:linear-gradient(150deg,#16a6a1 0 50%,#f28a43 51%)}
+.clip.linked-audio{cursor:pointer;background:linear-gradient(135deg,#214a3a,#293e35);border-style:dashed}.clip.legacy-audio{opacity:.72;cursor:default}

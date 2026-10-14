@@ -32,17 +32,22 @@ const defaultClip = media => ({
   crop: {x:0,y:0,w:1,h:1}, zoom: 1, focusX: .5, focusY: .5, scale: .45,
   positionX: .5, positionY: .5, rotation: 0, mirrorH: false, mirrorV: false,
   stabilize: false, stabilizeStrength: 12, opacity: 1, anchorText: "", tracking: null,
-  keyframes: {}
+  keyframes: {}, audioDetached: false
+});
+const defaultAudioClip = (media,start=0,duration=0) => ({
+  id:uid(),file:media.file,name:media.name||media.file,start:Math.max(0,Number(start)||0),
+  duration:Math.max(.05,Number(duration)||Number(media.duration)||3),sourceStart:0,
+  speed:1,reverse:false,volume:1,mute:false,linkedClipId:""
 });
 const freshProject = () => ({
-  version: "1.1.4-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
+  version: "1.2.0-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
   watermarkOpacity: .55, imageWatermark: {file:"",opacity:.7,scale:.2,x:.8,y:.08}, safeArea: false,
-  clips: [], audio: "", musicVolume: .5, voiceovers: [], audioDucking: true,
+  clips: [], audioClips: [], audio: "", musicVolume: .5, voiceovers: [], audioDucking: true,
   export: {container:"mp4",codec:"h264",width:"",height:"",quality:20,hardware:true,pcmAudio:false}
 });
 
 let project = freshProject();
-let media = [], recent = [], selectedClipId = "", selectedVoiceoverId = "", selectedMediaFile = "", libraryView = "project", inspectorTab = "clip";
+let media = [], recent = [], selectedClipId = "", selectedAudioClipId = "", selectedVoiceoverId = "", selectedMediaFile = "", libraryView = "project", inspectorTab = "clip";
 let history = [], future = [], playheadTime = 0, isPlayingTimeline = false, saveTimer, toastTimer, waveformCache = new Map();
 let audioContext, previewSource, previewGain, recorder, recordChunks = [], recordStart = 0;
 let suppressTimelineClick = false;
@@ -59,12 +64,15 @@ function restore(serialized){
   const value=incoming.project||incoming;
   project={...freshProject(),...value,imageWatermark:{...freshProject().imageWatermark,...(value.imageWatermark||{})},export:{...freshProject().export,...(value.export||{})}};
   project.clips=(value.clips||[]).map(clip=>({...defaultClip({file:clip.file,name:clip.name||clip.file,kind:clip.kind==="freeze"?"image":"video",duration:clip.end||3}),...clip,crop:{x:0,y:0,w:1,h:1,...(clip.crop||{})},keyframes:{...(clip.keyframes||{})}}));
-  project.voiceovers=value.voiceovers||[]; selectedClipId=project.clips[0]?.id||"";selectedVoiceoverId=""; renderAll();
+  project.audioClips=(value.audioClips||[]).map(item=>({...defaultAudioClip({file:item.file,name:item.name||item.file,duration:item.duration},item.start,item.duration),...item}));
+  project.voiceovers=value.voiceovers||[]; selectedClipId=project.clips[0]?.id||"";selectedAudioClipId="";selectedVoiceoverId=""; renderAll();
 }
 function toast(message){const node=$("#toast");node.textContent=message;node.classList.add("show");clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.classList.remove("show"),2600);}
 function selectedClip(){return project.clips.find(clip=>clip.id===selectedClipId);}
+function selectedAudioClip(){return project.audioClips.find(clip=>clip.id===selectedAudioClipId);}
 function selectedVoiceover(){return project.voiceovers.find(voice=>voice.id===selectedVoiceoverId);}
 function mediaByFile(file){return [...media,...recent].find(item=>item.file===file)||{file,name:file,url:"/media/"+encodeURIComponent(file),duration:0,kind:"video"};}
+function highlightedAudio(){return [...media,...recent].find(item=>item.file===selectedMediaFile&&item.kind==="audio");}
 function primaryClips(){return project.clips.filter(clip=>Number(clip.track)===0);}
 function durationOf(clip){return clip.kind==="freeze"?clamp(clip.duration,.1,3600):Math.max(.05,(Number(clip.end)-Number(clip.start))/clamp(clip.speed,.25,4));}
 function timelineLayout(){
@@ -74,6 +82,7 @@ function timelineLayout(){
     const start=Math.max(0,cursor-overlap); map.set(clip.id,{start,duration:durationOf(clip)}); cursor=start+durationOf(clip);
   }
   for(const clip of project.clips.filter(item=>Number(item.track)>0)) map.set(clip.id,{start:Number(clip.timelineStart)||0,duration:durationOf(clip)});
+  for(const audio of project.audioClips) map.set(audio.id,{start:Number(audio.start)||0,duration:Math.max(.05,Number(audio.duration)||.05)});
   for(const voice of project.voiceovers) map.set(voice.id,{start:Number(voice.start)||0,duration:Number(voice.duration)||3});
   const total=Math.max(cursor,...[...map.values()].map(item=>item.start+item.duration),1);
   return {map,total};
@@ -121,14 +130,17 @@ function preparePreviewProxy(file,autoplay=false){
 async function uploadFile(file){
   toast(`Importing ${file.name}…`);
   const item=await api("/api/upload",{method:"POST",headers:{"X-Filename":file.name,"Content-Type":"application/octet-stream"},body:file});
-  media=media.filter(value=>value.file!==item.file);media.unshift(item);selectedMediaFile=item.file;await refreshRecent();renderLibrary();toast(`${file.name} imported`);return item;
+  media=media.filter(value=>value.file!==item.file);media.unshift(item);selectedMediaFile=item.file;await refreshRecent();renderLibrary();renderInspector();toast(`${file.name} imported`);return item;
 }
 async function importFiles(files){for(const file of files){try{await uploadFile(file)}catch(error){toast(`${file.name}: ${error.message}`)}}snapshot(false);}
 function addMediaToTimeline(item){
-  if(item.kind==="audio"){pushChange(()=>{project.audio=item.file});toast("Set as project music");return;}
+  if(item.kind==="audio"){
+    const available=Math.max(.05,timelineLayout().total-playheadTime),audio=defaultAudioClip(item,playheadTime,Math.min(Number(item.duration)||available,available));
+    pushChange(()=>project.audioClips.push(audio));selectedAudioClipId=audio.id;selectedVoiceoverId="";inspectorTab="audio";renderAll();toast("Added music to A1");return;
+  }
   if(item.kind==="lut"){const clip=selectedClip();if(clip)pushChange(()=>clip.lut=item.file);else toast("Select a clip before applying a LUT");return;}
   const clip=defaultClip(item); if(item.kind==="image"){clip.track=1;clip.timelineStart=playheadTime;clip.scale=.35;}
-  pushChange(()=>project.clips.push(clip));selectedClipId=clip.id;selectedVoiceoverId="";renderAll();seekTimeline(timelineLayout().map.get(clip.id)?.start||0);toast("Added to timeline");
+  pushChange(()=>project.clips.push(clip));selectedClipId=clip.id;selectedAudioClipId="";selectedVoiceoverId="";renderAll();seekTimeline(timelineLayout().map.get(clip.id)?.start||0);toast("Added to timeline");
 }
 
 function renderLibrary(){
@@ -147,10 +159,12 @@ function renderTimeline(){
   requestAnimationFrame(drawWaveforms);
 }
 function timelineItems(track,map,scale){
-  if(track==="audio") return primaryClips().filter(clip=>mediaByFile(clip.file).hasAudio!==false).map(clip=>clipHtml(clip,map.get(clip.id),scale,"audio")).join("")+(project.audio?`<div class="clip audio" style="left:0;width:${Math.max(20,timelineLayout().total*scale)}px"><span class="clip-name">♫ ${escapeHtml(mediaByFile(project.audio).name)}</span></div>`:"");
+  if(track==="audio") return primaryClips().filter(clip=>!clip.audioDetached&&mediaByFile(clip.file).hasAudio!==false).map(clip=>linkedAudioHtml(clip,map.get(clip.id),scale)).join("")+project.audioClips.map(audio=>audioClipHtml(audio,map.get(audio.id),scale)).join("")+(project.audio?`<div class="clip audio legacy-audio" style="left:0;width:${Math.max(20,timelineLayout().total*scale)}px"><span class="clip-name">♫ Legacy music · ${escapeHtml(mediaByFile(project.audio).name)}</span></div>`:"");
   if(track==="voice") return project.voiceovers.map(voice=>voiceHtml(voice,map.get(voice.id),scale)).join("");
   return project.clips.filter(clip=>Number(clip.track)===Number(track)).map(clip=>clipHtml(clip,map.get(clip.id),scale,Number(track)>0?"overlay":"")).join("");
 }
+function linkedAudioHtml(clip,layout,scale){return `<div class="clip audio linked-audio ${selectedClipId===clip.id&&inspectorTab==="audio"&&!selectedAudioClipId?"selected":""}" data-linked-audio="${clip.id}" title="Linked to ${escapeHtml(clip.name)} — unlink it to edit independently" style="left:${layout.start*scale}px;width:${Math.max(20,layout.duration*scale)}px"><canvas class="waveform" data-waveform="${escapeHtml(clip.file)}"></canvas><span class="clip-name">🔗 ${clip.mute?"Muted · ":""}${escapeHtml(clip.name)}</span></div>`;}
+function audioClipHtml(audio,layout,scale){return `<div class="clip audio ${selectedAudioClipId===audio.id?"selected":""}" data-audio-clip="${audio.id}" title="Drag to move this independent audio clip" style="left:${layout.start*scale}px;width:${Math.max(20,layout.duration*scale)}px"><canvas class="waveform" data-waveform="${escapeHtml(audio.file)}"></canvas><span class="trim left"></span><span class="clip-name">♫ ${audio.mute?"Muted · ":""}${escapeHtml(audio.name)}</span><span class="trim right"></span></div>`;}
 function clipHtml(clip,layout,scale,kind){
   const transition=clip.transition!=="none"?`<span class="transition-badge">${escapeHtml(clip.transition)}</span>`:"";
   const sequence=Number(clip.track)===0?primaryClips().findIndex(item=>item.id===clip.id)+1:0;
@@ -171,15 +185,22 @@ const inputField=(label,prop,value,type="number",attrs="")=>`<div class="field">
 const checkField=(label,prop,value)=>`<label class="check"><input type="checkbox" data-prop="${prop}" ${value?"checked":""}> ${label}</label>`;
 function renderInspector(){
   $$("#inspectorTabs button").forEach(button=>button.classList.toggle("active",button.dataset.tab===inspectorTab));
-  const clip=selectedClip(),voice=selectedVoiceover(); $("#selectionLabel").textContent=voice&&inspectorTab==="audio"?(voice.name||"Voiceover"):clip?clip.name:"Project";
+  const clip=selectedClip(),audioClip=selectedAudioClip(),voice=selectedVoiceover(),music=highlightedAudio();
+  $("#selectionLabel").textContent=audioClip&&inspectorTab==="audio"?(audioClip.name||"Audio"):voice&&inspectorTab==="audio"?(voice.name||"Voiceover"):clip?clip.name:"Project";
   const body=$("#inspectorBody");
   const voiceSection=voice?`<div class="section"><h3>Selected voiceover</h3>${rangeField("Voice level","voice.volume",0,4,.01,voice.volume??1,"×")}${inputField("Timeline start","voice.start",voice.start??0,"number",'min="0" step=".01"')}<button data-action="remove-voice" class="danger">Remove selected voiceover</button></div>`:"";
+  const musicHint=music?`Highlighted music: <strong>${escapeHtml(music.name)}</strong>`:"Highlight an audio file in Media before replacing.";
+  if(inspectorTab==="audio"&&audioClip){
+    const linked=project.clips.find(item=>item.id===audioClip.linkedClipId);
+    body.innerHTML=`<div class="section"><h3>Independent A1 audio</h3><div class="notice">This audio can move, trim, mute, replace, or delete without changing the video.</div>${rangeField("Level","audio.volume",0,4,.01,audioClip.volume??1,"×")}${checkField("Mute audio","audio.mute",audioClip.mute)}${inputField("Timeline start","audio.start",audioClip.start??0,"number",'min="0" step=".01"')}${inputField("Duration","audio.duration",audioClip.duration??3,"number",'min=".05" step=".01"')}<p class="hint">${musicHint}</p><div class="row"><button data-action="replace-selected-audio" ${music?"":"disabled"}>Replace with highlighted music</button><button data-action="delete-audio" class="danger">Delete audio only</button></div>${linked?'<button data-action="restore-original-audio">Restore original linked audio</button>':""}</div><div class="section"><h3>Voice mix</h3>${checkField("Duck A1 audio under voiceover","project.audioDucking",project.audioDucking)}</div>`;
+    body.querySelectorAll("input[data-prop],select[data-prop]").forEach(control=>{control.addEventListener("input",inspectorInput);control.addEventListener("change",inspectorChange)});return;
+  }
   if(inspectorTab!=="project"&&!clip){if(inspectorTab==="audio"&&voice){body.innerHTML=voiceSection;body.querySelectorAll("input[data-prop],select[data-prop]").forEach(control=>{control.addEventListener("input",inspectorInput);control.addEventListener("change",inspectorChange)});return}body.innerHTML='<div class="empty">Select a timeline clip</div>';return;}
   if(inspectorTab==="clip") body.innerHTML=`<div class="section"><h3>Timing</h3>${inputField("Source in","start",clip.start,"number",'min="0" step=".01"')}${inputField("Source out","end",clip.end,"number",'min=".05" step=".01"')}${clip.kind==="freeze"?inputField("Still duration","duration",clip.duration||3,"number",'min=".1" step=".1"'):""}${rangeField("Speed","speed",.25,4,.05,clip.speed,"×")}${checkField("Reverse clip","reverse",clip.reverse)}</div><div class="section"><h3>Track & transition</h3><div class="field"><label>Video track</label><select data-prop="track"><option value="0" ${clip.track==0?"selected":""}>V1 · primary</option><option value="1" ${clip.track==1?"selected":""}>V2 · overlay</option><option value="2" ${clip.track==2?"selected":""}>V3 · overlay</option></select></div>${Number(clip.track)>0?inputField("Timeline start","timelineStart",clip.timelineStart,"number",'min="0" step=".01"'):""}<div class="field"><label>Transition in</label><select data-prop="transition">${["none","dissolve","fade","wipe","slide","zoom"].map(v=>`<option ${clip.transition===v?"selected":""}>${v}</option>`).join("")}</select></div>${rangeField("Transition","transitionDuration",.04,3,.01,clip.transitionDuration,"s")}</div>`;
   else if(inspectorTab==="transform") body.innerHTML=`<div class="section"><h3>Position & framing</h3>${rangeField("Zoom","zoom",1,8,.01,clip.zoom,"×")}${rangeField("Focus X","focusX",0,1,.01,clip.focusX)}${rangeField("Focus Y","focusY",0,1,.01,clip.focusY)}${Number(clip.track)>0?rangeField("Overlay scale","scale",.05,1,.01,clip.scale):""}${Number(clip.track)>0?rangeField("Position X","positionX",0,1,.01,clip.positionX):""}${Number(clip.track)>0?rangeField("Position Y","positionY",0,1,.01,clip.positionY):""}${rangeField("Rotation","rotation",-180,180,1,clip.rotation,"°")}${checkField("Mirror horizontally","mirrorH",clip.mirrorH)}${checkField("Mirror vertically","mirrorV",clip.mirrorV)}${rangeField("Opacity","opacity",0,1,.01,clip.opacity)}</div><div class="section"><h3>Crop (normalized)</h3>${rangeField("Left","crop.x",0,.95,.01,clip.crop.x)}${rangeField("Top","crop.y",0,.95,.01,clip.crop.y)}${rangeField("Width","crop.w",.05,1,.01,clip.crop.w)}${rangeField("Height","crop.h",.05,1,.01,clip.crop.h)}</div><div class="section"><h3>Stabilization</h3>${checkField("Enable stabilization","stabilize",clip.stabilize)}${rangeField("Strength","stabilizeStrength",4,32,1,clip.stabilizeStrength)}</div>`;
   else if(inspectorTab==="color") body.innerHTML=`<div class="section"><h3>Primary correction</h3>${rangeField("Brightness","brightness",-1,1,.01,clip.brightness)}${rangeField("Contrast","contrast",.1,4,.01,clip.contrast)}${rangeField("Saturation","saturation",0,4,.01,clip.saturation)}${rangeField("Gamma","gamma",.1,4,.01,clip.gamma)}</div><div class="section"><h3>Color balance</h3>${rangeField("Temperature","temperature",-100,100,1,clip.temperature)}${rangeField("Tint","tint",-100,100,1,clip.tint)}${rangeField("Hue","hue",-180,180,1,clip.hue,"°")}${rangeField("Shadows","shadows",-100,100,1,clip.shadows)}${rangeField("Highlights","highlights",-100,100,1,clip.highlights)}<div class="field"><label>3D LUT</label><select data-prop="lut"><option value="">None</option>${media.filter(i=>i.kind==="lut").map(i=>`<option value="${escapeHtml(i.file)}" ${clip.lut===i.file?"selected":""}>${escapeHtml(i.name)}</option>`).join("")}</select></div><button data-action="reset-color">Reset color</button></div>`;
   else if(inspectorTab==="motion") body.innerHTML=`<div class="notice">Start values come from Transform/Color. End values animate linearly across the clip.</div><div class="section"><h3>End keyframe</h3>${rangeField("End zoom","keyframes.zoomEnd",1,8,.01,clip.keyframes.zoomEnd??clip.zoom,"×")}${rangeField("End focus X","keyframes.focusXEnd",0,1,.01,clip.keyframes.focusXEnd??clip.focusX)}${rangeField("End focus Y","keyframes.focusYEnd",0,1,.01,clip.keyframes.focusYEnd??clip.focusY)}${rangeField("End brightness","keyframes.brightnessEnd",-1,1,.01,clip.keyframes.brightnessEnd??clip.brightness)}${rangeField("End contrast","keyframes.contrastEnd",.1,4,.01,clip.keyframes.contrastEnd??clip.contrast)}${rangeField("End saturation","keyframes.saturationEnd",0,4,.01,clip.keyframes.saturationEnd??clip.saturation)}${rangeField("End gamma","keyframes.gammaEnd",.1,4,.01,clip.keyframes.gammaEnd??clip.gamma)}<button data-action="clear-keyframes">Clear keyframes</button></div>`;
-  else if(inspectorTab==="audio") body.innerHTML=`${voiceSection}<div class="section"><h3>Clip audio</h3>${rangeField("Level","volume",0,4,.01,clip.volume,"×")}${checkField("Mute clip audio","mute",clip.mute)}${rangeField("End level","keyframes.volumeEnd",0,4,.01,clip.keyframes.volumeEnd??clip.volume,"×")}</div><div class="section"><h3>Project audio</h3>${rangeField("Music level","project.musicVolume",0,4,.01,project.musicVolume,"×")}${checkField("Duck music under voiceover","project.audioDucking",project.audioDucking)}<button data-action="clear-music">Remove music</button></div>`;
+  else if(inspectorTab==="audio") body.innerHTML=`${voiceSection}<div class="section"><h3>Video clip audio</h3>${clip.audioDetached?'<div class="notice">Original audio is unlinked. The video stays silent until you restore it; its independent audio is on A1 if it has not been deleted.</div>':'<div class="notice">Linked audio follows this video. Unlink it to edit or delete audio without changing the picture.</div>'}${rangeField("Level","volume",0,4,.01,clip.volume,"×")}${checkField("Mute clip audio","mute",clip.mute)}${rangeField("End level","keyframes.volumeEnd",0,4,.01,clip.keyframes.volumeEnd??clip.volume,"×")}<p class="hint">${musicHint}</p><div class="row">${clip.audioDetached?'<button data-action="restore-original-audio">Restore original audio</button>':'<button data-action="unlink-audio">Unlink audio to A1</button>'}<button data-action="replace-selected-audio" ${music?"":"disabled"}>Replace with highlighted music</button></div></div><div class="section"><h3>Voice mix</h3>${checkField("Duck A1 audio under voiceover","project.audioDucking",project.audioDucking)}${project.audio?`${rangeField("Legacy music level","project.musicVolume",0,4,.01,project.musicVolume,"×")}<button data-action="clear-music">Remove legacy music</button>`:""}</div>`;
   else if(inspectorTab==="ai"){
     const tracking=clip.tracking||{};body.innerHTML=`<div class="section"><h3>Subject tracking & mask</h3><div class="notice">Analyze through the clip, then correct the first-frame box manually if needed. The tracked path drives smart reframe and anchored text.</div><button data-action="analyze">Track subject</button> <button data-action="manual-track">Use manual box</button>${tracking.engine?`<p class="hint">${escapeHtml(tracking.engine)}${tracking.path?.length?` · ${tracking.path.length} samples`:""}</p>`:""}${rangeField("Box X","tracking.box.x",0,1,.01,tracking.box?.x??.2)}${rangeField("Box Y","tracking.box.y",0,1,.01,tracking.box?.y??.15)}${rangeField("Box width","tracking.box.w",.05,1,.01,tracking.box?.w??.6)}${rangeField("Box height","tracking.box.h",.05,1,.01,tracking.box?.h??.7)}${checkField("Draw tracked object outline","tracking.outline",tracking.outline)}<button data-action="smart-reframe">Smart reframe</button>${inputField("Anchored text","anchorText",clip.anchorText,"text",'maxlength="120"')} ${tracking.maskUrl?'<label class="check"><input id="showMask" type="checkbox"> Preview segmentation mask</label>':""}</div>`;
   } else body.innerHTML=projectInspector();
@@ -202,6 +223,7 @@ function inspectorInput(event){
   beginControlEdit(control);
   if(path.startsWith("project."))setNested(project,path.slice(8),value);
   else if(path.startsWith("voice.")){const voice=selectedVoiceover();if(voice)setNested(voice,path.slice(6),value);}
+  else if(path.startsWith("audio.")){const audio=selectedAudioClip();if(audio)setNested(audio,path.slice(6),value);}
   else setNested(selectedClip(),path,value);
   const clip=selectedClip();if(clip&&path.startsWith("crop.")){clip.crop.x=clamp(clip.crop.x,0,.95);clip.crop.y=clamp(clip.crop.y,0,.95);clip.crop.w=clamp(clip.crop.w,.05,1-clip.crop.x);clip.crop.h=clamp(clip.crop.h,.05,1-clip.crop.y);}
   const output=control.nextElementSibling;if(output?.tagName==="OUTPUT")output.textContent=`${Number(value).toFixed(Number(control.step)<1?2:0)}${output.textContent.replace(/[-\d.]/g,"")}`;
@@ -293,18 +315,51 @@ function movePrimaryClip(clip,offset){
   toast(`Moved to sequence position ${to+1}`);
 }
 
+function unlinkClipAudio(clip){
+  if(!clip)return null;
+  const existing=project.audioClips.find(audio=>audio.linkedClipId===clip.id);
+  if(existing)return existing;
+  const layout=timelineLayout().map.get(clip.id),item=mediaByFile(clip.file);
+  if(item.hasAudio===false)return null;
+  const audio=defaultAudioClip({file:clip.file,name:`${clip.name} audio`,duration:layout?.duration},layout?.start||0,layout?.duration||durationOf(clip));
+  const clipVolume=Number.isFinite(Number(clip.volume))?Number(clip.volume):1;
+  Object.assign(audio,{sourceStart:Number(clip.start)||0,speed:Number(clip.speed)||1,reverse:Boolean(clip.reverse),volume:clipVolume,linkedClipId:clip.id});
+  clip.audioBeforeDetach={mute:Boolean(clip.mute),volume:clipVolume};clip.audioDetached=true;clip.mute=true;project.audioClips.push(audio);return audio;
+}
+function replaceSelectedAudio(){
+  const music=highlightedAudio();if(!music)return toast("Highlight an audio file in Media first");
+  let audio=selectedAudioClip(),clip=selectedClip();
+  if(!audio&&(!clip||mediaByFile(clip.file).hasAudio===false))return toast("Select an A1 audio clip or a video clip with audio");
+  snapshot(true);
+  if(!audio&&clip)audio=unlinkClipAudio(clip);
+  if(!audio)return toast("Select an A1 audio clip or a video clip with audio");
+  Object.assign(audio,{file:music.file,name:music.name,sourceStart:0,speed:1,reverse:false,mute:false});
+  selectedAudioClipId=audio.id;selectedVoiceoverId="";inspectorTab="audio";renderAll();toast("Audio replaced on A1; video was not changed");
+}
+function restoreOriginalAudio(){
+  const audio=selectedAudioClip(),clip=audio?.linkedClipId?project.clips.find(item=>item.id===audio.linkedClipId):selectedClip();
+  if(!clip)return toast("The original video clip is no longer available");
+  pushChange(()=>{project.audioClips=project.audioClips.filter(item=>item.linkedClipId!==clip.id);clip.audioDetached=false;clip.mute=Boolean(clip.audioBeforeDetach?.mute);if(clip.audioBeforeDetach?.volume!=null)clip.volume=clip.audioBeforeDetach.volume;delete clip.audioBeforeDetach;selectedAudioClipId="";selectedClipId=clip.id});
+  toast("Original video audio restored");
+}
+
 function action(name){
-  const clip=selectedClip(),layout=clip&&timelineLayout().map.get(clip.id);
+  const clip=selectedClip(),audioClip=selectedAudioClip(),layout=clip&&timelineLayout().map.get(clip.id);
   if(name==="import")return $("#mediaFiles").click();
-  if(name==="new"){if(!confirm("Start a new project? The current project will be kept as the previous recovery snapshot."))return;const current=localStorage.getItem("vdodesk.autosave")||JSON.stringify({project,media,at:Date.now()});localStorage.setItem("vdodesk.recovery.previous",current);history=[];future=[];project=freshProject();selectedClipId="";selectedVoiceoverId="";snapshot(false);renderAll();return}
+  if(name==="new"){if(!confirm("Start a new project? The current project will be kept as the previous recovery snapshot."))return;const current=localStorage.getItem("vdodesk.autosave")||JSON.stringify({project,media,at:Date.now()});localStorage.setItem("vdodesk.recovery.previous",current);history=[];future=[];project=freshProject();selectedClipId="";selectedAudioClipId="";selectedVoiceoverId="";snapshot(false);renderAll();return}
   if(name==="save")return saveProject(); if(name==="open")return $("#projectFile").click(); if(name==="export")return openExportDialog(); if(name==="preview")return startRender(true);
   if(name==="undo"&&history.length){future.push(JSON.stringify(project));restore(history.pop());snapshot(false);return}if(name==="redo"&&future.length){history.push(JSON.stringify(project));restore(future.pop());snapshot(false);return}
   if(name==="play")return togglePlay();if(name==="timeline-start")return seekTimeline(0);if(name==="timeline-end")return seekTimeline(timelineLayout().total-1/project.fps);if(name==="clip-start"&&layout)return seekTimeline(layout.start);if(name==="clip-end"&&layout)return seekTimeline(layout.start+layout.duration-1/project.fps);if(name==="step-back")return seekTimeline(playheadTime-1/project.fps);if(name==="step-forward")return seekTimeline(playheadTime+1/project.fps);
+  if(name==="delete"&&audioClip)return action("delete-audio");
   if(name==="delete"&&clip)return pushChange(()=>{project.clips=project.clips.filter(c=>c.id!==clip.id);selectedClipId=project.clips[0]?.id||""});
   if(name==="duplicate"&&clip)return pushChange(()=>{const copy=structuredClone(clip);copy.id=uid();copy.name+=" copy";if(copy.track>0)copy.timelineStart+=.25;project.clips.splice(project.clips.indexOf(clip)+1,0,copy);selectedClipId=copy.id});
   if(name==="move-earlier")return movePrimaryClip(clip,-1);if(name==="move-later")return movePrimaryClip(clip,1);
   if(name==="split"&&clip&&clip.kind!=="freeze"&&layout){const sourceAt=clip.start+(playheadTime-layout.start)*clip.speed;if(sourceAt<=clip.start+.05||sourceAt>=clip.end-.05)return toast("Move the playhead inside the selected clip");pushChange(()=>{const copy=structuredClone(clip);copy.id=uid();copy.start=sourceAt;copy.name+=" B";clip.end=sourceAt;project.clips.splice(project.clips.indexOf(clip)+1,0,copy);selectedClipId=copy.id});return}
   if(name==="freeze"&&clip)return createFreeze(clip);if(name==="record")return toggleRecording();if(name==="relink")return selectedMediaFile?$("#relinkFile").click():toast("Select a media file first");
+  if(name==="unlink-audio"&&clip){if(mediaByFile(clip.file).hasAudio===false)return toast("This clip has no audio stream");snapshot(true);const audio=unlinkClipAudio(clip);if(!audio)return toast("This clip has no audio stream");selectedAudioClipId=audio.id;selectedVoiceoverId="";inspectorTab="audio";renderAll();toast("Audio unlinked to A1");return}
+  if(name==="replace-selected-audio")return replaceSelectedAudio();
+  if(name==="delete-audio"&&audioClip){pushChange(()=>{project.audioClips=project.audioClips.filter(item=>item.id!==audioClip.id);selectedAudioClipId=""});toast("Audio deleted; video kept");return}
+  if(name==="restore-original-audio")return restoreOriginalAudio();
   if(name==="remove-voice"&&selectedVoiceoverId)return pushChange(()=>{project.voiceovers=project.voiceovers.filter(voice=>voice.id!==selectedVoiceoverId);selectedVoiceoverId=""});
   if(name==="reset-color"&&clip)return pushChange(()=>Object.assign(clip,{brightness:0,contrast:1,saturation:1,gamma:1,temperature:0,tint:0,hue:0,shadows:0,highlights:0,lut:""}));
   if(name==="reset-filter"&&clip)return pushChange(()=>Object.assign(clip,{filter:"none",filterIntensity:1}));
@@ -324,7 +379,7 @@ async function startRender(previewMode=false){
 async function pollJob(job,previewMode){try{const state=await api(`/api/job/${job}`);toast(`${state.message}${state.progress?` · ${state.progress}%`:""}`);if(state.state==="done"){if(previewMode){preview.src=state.url;preview.play().catch(error=>toast(`Preview could not start: ${error.message}`));}else{const link=document.createElement("a");link.href=state.url;link.download="";link.click();}const warnings=state.details?.warnings||[];if(warnings.length)toast(`Export ready · ${warnings.join(" ")}`);return}if(state.state==="error")return;setTimeout(()=>pollJob(job,previewMode),900)}catch(error){toast(error.message)}}
 async function toggleRecording(){
   if(recorder?.state==="recording"){recorder.stop();return}
-  try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});recordChunks=[];recorder=new MediaRecorder(stream);recordStart=playheadTime;recorder.ondataavailable=e=>recordChunks.push(e.data);recorder.onstop=async()=>{stream.getTracks().forEach(track=>track.stop());$("#recordButton").classList.remove("recording");$("#recordButton").textContent="● Voiceover";try{const blob=new Blob(recordChunks,{type:recorder.mimeType});const file=new File([blob],`voiceover-${Date.now()}.webm`,{type:blob.type});const item=await uploadFile(file);const duration=await blobDuration(blob),voice={id:uid(),file:item.file,name:item.name,start:recordStart,duration,volume:1};snapshot(true);project.voiceovers.push(voice);selectedVoiceoverId=voice.id;inspectorTab="audio";renderAll();toast("Voiceover added with automatic ducking")}catch(error){toast(error.message)}};recorder.start();$("#recordButton").classList.add("recording");$("#recordButton").textContent="■ Stop recording";toast("Recording voiceover…")}catch(error){toast(`Microphone unavailable: ${error.message}`)}
+  try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});recordChunks=[];recorder=new MediaRecorder(stream);recordStart=playheadTime;recorder.ondataavailable=e=>recordChunks.push(e.data);recorder.onstop=async()=>{stream.getTracks().forEach(track=>track.stop());$("#recordButton").classList.remove("recording");$("#recordButton").textContent="● Voiceover";try{const blob=new Blob(recordChunks,{type:recorder.mimeType});const file=new File([blob],`voiceover-${Date.now()}.webm`,{type:blob.type});const item=await uploadFile(file);const duration=await blobDuration(blob),voice={id:uid(),file:item.file,name:item.name,start:recordStart,duration,volume:1};snapshot(true);project.voiceovers.push(voice);selectedAudioClipId="";selectedVoiceoverId=voice.id;inspectorTab="audio";renderAll();toast("Voiceover added with automatic ducking")}catch(error){toast(error.message)}};recorder.start();$("#recordButton").classList.add("recording");$("#recordButton").textContent="■ Stop recording";toast("Recording voiceover…")}catch(error){toast(`Microphone unavailable: ${error.message}`)}
 }
 function blobDuration(blob){return new Promise(resolve=>{const audio=document.createElement("audio");audio.preload="metadata";audio.onloadedmetadata=()=>{URL.revokeObjectURL(audio.src);resolve(Number.isFinite(audio.duration)?audio.duration:3)};audio.src=URL.createObjectURL(blob)});}
 
@@ -333,15 +388,17 @@ document.addEventListener("click",event=>{
   const actionNode=event.target.closest("[data-action]");if(actionNode){event.preventDefault();action(actionNode.dataset.action);return}
   const filterNode=event.target.closest("[data-filter]");if(filterNode){event.preventDefault();const clip=selectedClip();if(clip)pushChange(()=>{clip.filter=filterNode.dataset.filter;clip.filterIntensity=clip.filterIntensity??1});return}
   const add=event.target.closest("[data-add]");if(add){event.stopPropagation();addMediaToTimeline(mediaByFile(add.dataset.add));return}
-  const card=event.target.closest("[data-media]");if(card){selectedMediaFile=card.dataset.media;renderLibrary();return}
-  const voiceNode=event.target.closest("[data-voice]");if(voiceNode){selectedVoiceoverId=voiceNode.dataset.voice;inspectorTab="audio";playheadTime=Number(selectedVoiceover()?.start)||0;renderTimeline();renderInspector();updateTimecode();return}
-  const clipNode=event.target.closest("[data-clip]");if(clipNode){selectedClipId=clipNode.dataset.clip;selectedVoiceoverId="";const item=timelineLayout().map.get(selectedClipId);seekTimeline(item.start);renderAll();return}
+  const card=event.target.closest("[data-media]");if(card){selectedMediaFile=card.dataset.media;renderLibrary();renderInspector();return}
+  const audioNode=event.target.closest("[data-audio-clip]");if(audioNode){selectedAudioClipId=audioNode.dataset.audioClip;selectedVoiceoverId="";inspectorTab="audio";playheadTime=Number(selectedAudioClip()?.start)||0;renderTimeline();renderInspector();updateTimecode();return}
+  const linkedAudioNode=event.target.closest("[data-linked-audio]");if(linkedAudioNode){selectedClipId=linkedAudioNode.dataset.linkedAudio;selectedAudioClipId="";selectedVoiceoverId="";inspectorTab="audio";const item=timelineLayout().map.get(selectedClipId);playheadTime=item?.start||0;renderTimeline();renderInspector();updateTimecode();return}
+  const voiceNode=event.target.closest("[data-voice]");if(voiceNode){selectedAudioClipId="";selectedVoiceoverId=voiceNode.dataset.voice;inspectorTab="audio";playheadTime=Number(selectedVoiceover()?.start)||0;renderTimeline();renderInspector();updateTimecode();return}
+  const clipNode=event.target.closest("[data-clip]");if(clipNode){selectedClipId=clipNode.dataset.clip;selectedAudioClipId="";selectedVoiceoverId="";const item=timelineLayout().map.get(selectedClipId);seekTimeline(item.start);renderAll();return}
 });
 $("#inspectorTabs").addEventListener("click",event=>{const button=event.target.closest("[data-tab]");if(button){inspectorTab=button.dataset.tab;renderInspector()}});
 $$('[data-library]').forEach(button=>button.addEventListener("click",()=>{libraryView=button.dataset.library;$$('[data-library]').forEach(b=>b.classList.toggle("active",b===button));renderLibrary()}));
 $("#mediaFiles").addEventListener("change",event=>importFiles(event.target.files));
 $("#projectFile").addEventListener("change",async event=>{try{restore(await event.target.files[0].text());snapshot(false);toast("Project opened") }catch(error){toast(`Invalid project: ${error.message}`)}});
-$("#relinkFile").addEventListener("change",async event=>{try{const old=selectedMediaFile,item=await uploadFile(event.target.files[0]);snapshot(true);project.clips.filter(c=>c.file===old).forEach(c=>{c.file=item.file;c.name=item.name});project.voiceovers.filter(c=>c.file===old).forEach(c=>c.file=item.file);if(project.audio===old)project.audio=item.file;if(project.imageWatermark.file===old)project.imageWatermark.file=item.file;selectedMediaFile=item.file;renderAll();toast("All project references relinked")}catch(error){toast(error.message)}});
+$("#relinkFile").addEventListener("change",async event=>{try{const old=selectedMediaFile,item=await uploadFile(event.target.files[0]);snapshot(true);project.clips.filter(c=>c.file===old).forEach(c=>{c.file=item.file;c.name=item.name});project.audioClips.filter(c=>c.file===old).forEach(c=>{c.file=item.file;c.name=item.name});project.voiceovers.filter(c=>c.file===old).forEach(c=>c.file=item.file);if(project.audio===old)project.audio=item.file;if(project.imageWatermark.file===old)project.imageWatermark.file=item.file;selectedMediaFile=item.file;renderAll();toast("All project references relinked")}catch(error){toast(error.message)}});
 $("#projectName").addEventListener("input",event=>{project.name=event.target.value;snapshot(false)});
 $("#timelineZoom").addEventListener("input",renderTimeline);$("#proxyToggle").addEventListener("change",()=>loadSelectedPreview(false));
 $("#inspectorBody").addEventListener("change",event=>{if(event.target.matches("[data-project]")){rememberUndoState();const value=event.target.type==="checkbox"?event.target.checked:event.target.dataset.project==="fps"?Number(event.target.value):event.target.value;setNested(project,event.target.dataset.project,value);snapshot(false);renderAll()}if(event.target.id==="showMask")applyPreviewEffects()});
@@ -363,6 +420,7 @@ function videoTrackAtPoint(x,y){
   const track=document.elementFromPoint(x,y)?.closest("[data-track]");
   return track&&["0","1","2"].includes(track.dataset.track)?track:null;
 }
+function audioTrackAtPoint(x,y){const track=document.elementFromPoint(x,y)?.closest('[data-track="audio"]');return track||null;}
 function timelineTimeAtPoint(x,track){
   const lane=track.querySelector(".track-lane").getBoundingClientRect();
   return Math.max(0,(x-lane.left)/Number($("#timelineZoom").value));
@@ -400,10 +458,18 @@ function showTimelineDropUI(event,target){
   marker.style.left=`${Math.max(0,Math.min(rect.width,event.clientX-rect.left))}px`;
 }
 function restoreDraggedClip(){
-  const clip=dragState.clip,original=dragState.original;
+  const clip=dragState.clip||dragState.audioClip,original=dragState.original;
   Object.keys(clip).forEach(key=>delete clip[key]);Object.assign(clip,structuredClone(original));
 }
 tracks.addEventListener("pointerdown",event=>{
+  const audioNode=event.target.closest("[data-audio-clip]");
+  if(audioNode){
+    const audioClip=project.audioClips.find(item=>item.id===audioNode.dataset.audioClip);if(!audioClip)return;
+    const side=event.target.classList.contains("left")?"left":event.target.classList.contains("right")?"right":"move",trackNode=audioNode.closest("[data-track]"),layout=timelineLayout().map.get(audioClip.id),pointerTime=timelineTimeAtPoint(event.clientX,trackNode);
+    selectedAudioClipId=audioClip.id;selectedVoiceoverId="";inspectorTab="audio";
+    dragState={audioClip,node:audioNode,startX:event.clientX,startY:event.clientY,original:structuredClone(audioClip),beforeProject:JSON.stringify(project),side,pointerId:event.pointerId,moved:false,changed:false,grabOffset:Math.max(0,pointerTime-(layout?.start||0))};
+    tracks.setPointerCapture(event.pointerId);if(side==="move")audioNode.classList.add("dragging");event.preventDefault();return;
+  }
   const clipNode=event.target.closest("[data-clip]");if(!clipNode)return;
   const sourceTrack=clipNode.closest("[data-track]")?.dataset.track;
   if(sourceTrack==="audio")return toast("Drag the corresponding video clip on V1");
@@ -411,7 +477,7 @@ tracks.addEventListener("pointerdown",event=>{
   const side=event.target.classList.contains("left")?"left":event.target.classList.contains("right")?"right":"move";
   const layout=timelineLayout().map.get(clip.id),sourceTrackNode=clipNode.closest("[data-track]");
   const pointerTime=timelineTimeAtPoint(event.clientX,sourceTrackNode);
-  selectedClipId=clip.id;selectedVoiceoverId="";
+  selectedClipId=clip.id;selectedAudioClipId="";selectedVoiceoverId="";
   dragState={clip,node:clipNode,startX:event.clientX,startY:event.clientY,original:structuredClone(clip),
     beforeProject:JSON.stringify(project),side,pointerId:event.pointerId,moved:false,changed:false,
     grabOffset:Math.max(0,pointerTime-(layout?.start||0))};
@@ -420,8 +486,20 @@ tracks.addEventListener("pointerdown",event=>{
 });
 tracks.addEventListener("pointermove",event=>{
   if(!dragState)return;
-  const pixelDelta=event.clientX-dragState.startX,delta=pixelDelta/Number($("#timelineZoom").value),{clip,original,side}=dragState;
+  const pixelDelta=event.clientX-dragState.startX,delta=pixelDelta/Number($("#timelineZoom").value),{clip,audioClip,original,side}=dragState;
   if(Math.hypot(pixelDelta,event.clientY-dragState.startY)>3)dragState.moved=true;
+  if(audioClip){
+    if(side!=="move"){
+      if(Math.abs(pixelDelta)<1)return;beginTimelineChange();
+      if(side==="left"){
+        const speed=Math.max(.25,Number(original.speed)||1),low=Math.max(-Number(original.start||0),-Number(original.sourceStart||0)/speed),applied=clamp(delta,low,Number(original.duration)-.05);
+        audioClip.start=Number(original.start)+applied;audioClip.sourceStart=Math.max(0,Number(original.sourceStart||0)+applied*speed);audioClip.duration=Math.max(.05,Number(original.duration)-applied);
+      }else audioClip.duration=Math.max(.05,Number(original.duration)+delta);
+      renderTimeline();return;
+    }
+    const bounds=timelineScroll.getBoundingClientRect();if(event.clientX<bounds.left+45)timelineScroll.scrollLeft=Math.max(0,timelineScroll.scrollLeft-14);else if(event.clientX>bounds.right-45)timelineScroll.scrollLeft+=14;
+    dragState.node.style.transform=`translate(${pixelDelta}px,${event.clientY-dragState.startY}px)`;const target=audioTrackAtPoint(event.clientX,event.clientY);if(target)showTimelineDropUI(event,target);else clearTimelineDropTarget();event.preventDefault();return;
+  }
   if(side!=="move"){
     if(Math.abs(pixelDelta)<1)return;beginTimelineChange();
     if(side==="left"&&clip.kind!=="freeze")clip.start=clamp(original.start+delta*original.speed,0,original.end-.05);
@@ -438,9 +516,13 @@ tracks.addEventListener("pointermove",event=>{
 });
 function finishTimelineDrag(event,cancelled=false){
   if(!dragState)return;
-  const state=dragState,target=!cancelled&&state.side==="move"?videoTrackAtPoint(event.clientX,event.clientY):null;
+  const state=dragState,target=!cancelled&&state.side==="move"?(state.audioClip?audioTrackAtPoint(event.clientX,event.clientY):videoTrackAtPoint(event.clientX,event.clientY)):null;
   clearTimelineDropUI();
   if(cancelled){if(state.changed)restoreDraggedClip()}
+  else if(state.audioClip&&state.side==="move"&&state.moved&&target){
+    const dropTime=timelineTimeAtPoint(event.clientX,target),newStart=Math.round(Math.max(0,dropTime-state.grabOffset)*project.fps)/project.fps;
+    if(Math.abs(newStart-Number(state.audioClip.start||0))>.0001){beginTimelineChange();state.audioClip.start=newStart}
+  }
   else if(state.side==="move"&&state.moved&&target){
     const targetTrack=Number(target.dataset.track),dropTime=timelineTimeAtPoint(event.clientX,target);
     if(targetTrack===0){
@@ -457,7 +539,7 @@ function finishTimelineDrag(event,cancelled=false){
   const changed=state.changed,moved=state.moved;dragState=null;
   if(changed)snapshot(false);renderAll();
   if(moved){suppressTimelineClick=true;setTimeout(()=>{suppressTimelineClick=false},0)}
-  if(changed&&state.side==="move")toast(Number(state.clip.track)===0?"Clip reordered on V1":"Clip moved on timeline");
+  if(changed&&state.side==="move")toast(state.audioClip?"Audio moved on A1":Number(state.clip.track)===0?"Clip reordered on V1":"Clip moved on timeline");
 }
 tracks.addEventListener("pointerup",event=>finishTimelineDrag(event));
 tracks.addEventListener("pointercancel",event=>finishTimelineDrag(event,true));

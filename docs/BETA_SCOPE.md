@@ -1,4 +1,4 @@
-# VDODesk 1.1.4 beta 1 scope and implementation map
+# VDODesk 1.2.0 beta 1 scope and implementation map
 
 The original roadmap is implemented in the retained local Python/browser/FFmpeg architecture.
 
@@ -15,7 +15,7 @@ The original roadmap is implemented in the retained local Python/browser/FFmpeg 
 | Proxy/GPU/background work | Automatic proxy jobs, browser-accelerated playback, background preview/export, VideoToolbox encode detection |
 | Recovery and relinking | Browser autosave plus previous-project recovery, downloadable project manifests, complete workspace rediscovery and reference replacement across a project |
 | Export expansion | MP4/MOV/WebM, H.264/H.265/VP9, custom even dimensions, quality and hardware/software selection |
-| Recent files and clip audio | Persistent last ten imports, waveform lane, mute, animated 0–400% live/export gain and editable voiceovers |
+| Recent files and clip audio | Persistent last ten imports, waveform lane, mute, animated 0–400% live/export gain, unlinkable A1 audio, audio-only deletion, selected-music replacement and editable voiceovers |
 
 Version 1.1 beta 1 adds explicit video sequencing controls, numbered timeline clips, selected-clip filter presets and the new VDODesk application logo. It retains the sidechain, undo grouping, continuous ruler scrubbing, crop constraints and export compatibility fixes from version 1.0 beta 1.
 
@@ -26,6 +26,8 @@ Version 1.1.2 beta 1 fixes export failures on FFmpeg builds without the optional
 Version 1.1.3 beta 1 makes timeline clip movement a direct drag-and-drop interaction. V1 clips reorder magnetically, V2/V3 clips move freely with frame snapping, and clips can be moved between video tracks using highlighted drop targets.
 
 Version 1.1.4 beta 1 guarantees text export even when FFmpeg provides neither `drawtext` nor libass. VDODesk renders opening titles, watermarks and tracked labels to transparent images and composites them with the standard video overlay filter. A dependency-free embedded bitmap font remains available when Pillow is not installed.
+
+Version 1.2.0 beta 1 replaces the old project-music shortcut with true A1 editing. Source audio can be unlinked from video, selected and deleted independently, replaced with a highlighted music file, dragged or trimmed on A1, and restored to the original linked state. Independent audio is persisted, relinked, mixed into preview renders and final exports, and included in undo/redo.
 
 ## Architecture boundary
 

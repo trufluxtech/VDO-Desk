@@ -139,6 +139,41 @@ class RenderEngineTests(unittest.TestCase):
             self.assertGreater(self.decoded_audio_rms(loud), baseline_rms * 1.5)
 
     @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg is required")
+    def test_detached_a1_audio_replaces_muted_video_audio(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, replacement = root / "source.mp4", root / "music.wav"
+            subprocess.run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                "color=c=navy:s=160x90:r=20:d=0.8", "-f", "lavfi", "-i",
+                "sine=frequency=330:sample_rate=48000:duration=0.8", "-shortest",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(source),
+            ], check=True)
+            subprocess.run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                "sine=frequency=990:sample_rate=48000:duration=0.25", str(replacement),
+            ], check=True)
+            base_spec = {
+                "ratio": "16:9", "fps": 20,
+                "clips": [{"id": "video-1", "file": source.name, "track": 0, "start": 0,
+                           "end": .7, "speed": 1, "mute": True,
+                           "audioDetached": True,
+                           "crop": {"x": 0, "y": 0, "w": 1, "h": 1}}],
+                "export": {"container": "mp4", "codec": "h264", "width": 320,
+                           "height": 180, "hardware": False, "quality": 30},
+            }
+            silent, _ = render_engine.render_project("detached-silent", base_spec, root, root, lambda *_: None)
+            replaced_spec = copy.deepcopy(base_spec)
+            replaced_spec["audioClips"] = [{
+                "id": "audio-1", "file": replacement.name, "name": "Music", "start": .1,
+                "duration": .5, "sourceStart": 0, "speed": 1, "volume": .8,
+                "linkedClipId": "video-1",
+            }]
+            replaced, _ = render_engine.render_project("detached-replaced", replaced_spec, root, root, lambda *_: None)
+            self.assertLess(self.decoded_audio_rms(silent), 2)
+            self.assertGreater(self.decoded_audio_rms(replaced), 100)
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg is required")
     def test_transitions_overlays_titles_music_and_voiceover_render_together(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

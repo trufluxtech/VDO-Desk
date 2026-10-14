@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0-beta.1
+
+- Replaced the one-click global music shortcut with editable audio clips on A1.
+- Added one-click unlinking of a video clip's source audio while leaving the picture intact.
+- Added independent A1 selection, drag positioning, edge trimming, gain, mute, and audio-only deletion.
+- Added replacement of selected/unlinked audio with the highlighted imported music file while preserving timeline position and duration.
+- Added restoration of the original linked audio after replacement or deletion.
+- Added project persistence, relinking, undo/redo, waveform display, and FFmpeg export mixing for independent A1 audio.
+- Added an end-to-end render test proving replacement music is exported when the video source audio is detached and muted.
+
 ## 1.1.4-beta.1
 
 - Fixed opening titles and text overlays being omitted from completed exports.

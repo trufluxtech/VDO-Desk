@@ -628,6 +628,22 @@ def finish_project(base, spec, media, output, temp, total_duration, text_filters
     if music_name and (media / music_name).is_file():
         music_index = input_index; input_index += 1
         command += ["-stream_loop", "-1", "-i", str(media / music_name)]
+    timeline_audio = []
+    for audio_clip in spec.get("audioClips") or []:
+        name = safe_name(audio_clip.get("file"))
+        source = media / name
+        if audio_clip.get("mute") or not name or not source.is_file():
+            continue
+        try:
+            if not probe_media(source).get("hasAudio"):
+                warnings.append(f"Skipped A1 item without audio: {name}.")
+                continue
+        except (ValueError, subprocess.CalledProcessError):
+            warnings.append(f"Skipped unreadable A1 audio: {name}.")
+            continue
+        source_start = number(audio_clip.get("sourceStart"), 0, 86400, 0)
+        timeline_audio.append((input_index, audio_clip)); input_index += 1
+        command += ["-stream_loop", "-1", "-ss", str(source_start), "-i", str(source)]
     voices = []
     for voice in spec.get("voiceovers") or []:
         name = safe_name(voice.get("file"))
@@ -715,6 +731,27 @@ def finish_project(base, spec, media, output, temp, total_duration, text_filters
         graph.append(f"[{music_index}:a]atrim=duration={total_duration:.6f},asetpts=PTS-STARTPTS,volume={music_volume:.6f}[music]")
         graph.append(f"[{audio_label}][music]amix=inputs=2:duration=first:dropout_transition=0[bed]")
         audio_label = "bed"
+    timeline_audio_labels = []
+    for number_index, (source_index, audio_clip) in enumerate(timeline_audio):
+        start = number(audio_clip.get("start"), 0, total_duration, 0)
+        duration = min(number(audio_clip.get("duration"), .05, 86400, 3),
+                       max(.05, total_duration - start))
+        speed = number(audio_clip.get("speed"), .25, 4, 1)
+        volume = number(audio_clip.get("volume"), 0, 4, 1)
+        filters = [f"atrim=duration={duration * speed:.6f}", "asetpts=PTS-STARTPTS"]
+        if audio_clip.get("reverse"):
+            filters += ["areverse", "asetpts=PTS-STARTPTS"]
+        filters += atempo_filters(speed)
+        delay = round(start * 1000)
+        filters += [f"atrim=duration={duration:.6f}", f"volume={volume:.6f}",
+                    f"adelay={delay}|{delay}", "aresample=48000:async=1:first_pts=0"]
+        label = f"timelineaudio{number_index}"
+        graph.append(f"[{source_index}:a]{','.join(filters)}[{label}]")
+        timeline_audio_labels.append(f"[{label}]")
+    if timeline_audio_labels:
+        graph.append(f"[{audio_label}]" + "".join(timeline_audio_labels) +
+                     f"amix=inputs={len(timeline_audio_labels) + 1}:duration=first:dropout_transition=0[timelinebed]")
+        audio_label = "timelinebed"
     voice_labels = []
     for number_index, (source_index, voice) in enumerate(voices):
         delay = round(number(voice.get("start"), 0, total_duration, 0) * 1000)
