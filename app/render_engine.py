@@ -5,7 +5,10 @@ from pathlib import Path
 import json
 import math
 import shutil
+import struct
 import subprocess
+import textwrap
+import zlib
 
 from media_services import encoder_capabilities, filter_capabilities, probe_media, run
 
@@ -105,12 +108,134 @@ def text_renderer(capabilities):
         return "drawtext"
     if capabilities.get("ass") or capabilities.get("subtitles"):
         return "libass"
-    return "none"
+    return "builtin-image"
 
 
-def add_warning(warnings, message):
-    if message not in warnings:
-        warnings.append(message)
+# Dependency-free 5x7 fallback used only when FFmpeg has neither drawtext nor
+# libass and Pillow is unavailable. Lowercase uses the matching uppercase glyph.
+BITMAP_GLYPHS = {
+    "A":("01110","10001","10001","11111","10001","10001","10001"),
+    "B":("11110","10001","10001","11110","10001","10001","11110"),
+    "C":("01111","10000","10000","10000","10000","10000","01111"),
+    "D":("11110","10001","10001","10001","10001","10001","11110"),
+    "E":("11111","10000","10000","11110","10000","10000","11111"),
+    "F":("11111","10000","10000","11110","10000","10000","10000"),
+    "G":("01111","10000","10000","10111","10001","10001","01111"),
+    "H":("10001","10001","10001","11111","10001","10001","10001"),
+    "I":("11111","00100","00100","00100","00100","00100","11111"),
+    "J":("00111","00010","00010","00010","10010","10010","01100"),
+    "K":("10001","10010","10100","11000","10100","10010","10001"),
+    "L":("10000","10000","10000","10000","10000","10000","11111"),
+    "M":("10001","11011","10101","10101","10001","10001","10001"),
+    "N":("10001","11001","10101","10011","10001","10001","10001"),
+    "O":("01110","10001","10001","10001","10001","10001","01110"),
+    "P":("11110","10001","10001","11110","10000","10000","10000"),
+    "Q":("01110","10001","10001","10001","10101","10010","01101"),
+    "R":("11110","10001","10001","11110","10100","10010","10001"),
+    "S":("01111","10000","10000","01110","00001","00001","11110"),
+    "T":("11111","00100","00100","00100","00100","00100","00100"),
+    "U":("10001","10001","10001","10001","10001","10001","01110"),
+    "V":("10001","10001","10001","10001","10001","01010","00100"),
+    "W":("10001","10001","10001","10101","10101","10101","01010"),
+    "X":("10001","10001","01010","00100","01010","10001","10001"),
+    "Y":("10001","10001","01010","00100","00100","00100","00100"),
+    "Z":("11111","00001","00010","00100","01000","10000","11111"),
+    "0":("01110","10001","10011","10101","11001","10001","01110"),
+    "1":("00100","01100","00100","00100","00100","00100","01110"),
+    "2":("01110","10001","00001","00010","00100","01000","11111"),
+    "3":("11110","00001","00001","01110","00001","00001","11110"),
+    "4":("00010","00110","01010","10010","11111","00010","00010"),
+    "5":("11111","10000","10000","11110","00001","00001","11110"),
+    "6":("01110","10000","10000","11110","10001","10001","01110"),
+    "7":("11111","00001","00010","00100","01000","01000","01000"),
+    "8":("01110","10001","10001","01110","10001","10001","01110"),
+    "9":("01110","10001","10001","01111","00001","00001","01110"),
+    " ":("00000",)*7,".":("00000","00000","00000","00000","00000","00110","00110"),
+    ",":("00000","00000","00000","00000","00110","00110","00100"),
+    ":":("00000","00110","00110","00000","00110","00110","00000"),
+    "-":("00000","00000","00000","11111","00000","00000","00000"),
+    "_":("00000","00000","00000","00000","00000","00000","11111"),
+    "/":("00001","00010","00010","00100","01000","01000","10000"),
+    "!":("00100","00100","00100","00100","00100","00000","00100"),
+    "?":("01110","10001","00001","00010","00100","00000","00100"),
+    "'":("00100","00100","00000","00000","00000","00000","00000"),
+    '"':("01010","01010","00000","00000","00000","00000","00000"),
+    "(":("00010","00100","01000","01000","01000","00100","00010"),
+    ")":("01000","00100","00010","00010","00010","00100","01000"),
+    "+":("00000","00100","00100","11111","00100","00100","00000"),
+    "=":("00000","11111","00000","11111","00000","00000","00000"),
+    "&":("01100","10010","10100","01000","10101","10010","01101"),
+    "@":("01110","10001","10111","10101","10111","10000","01110"),
+    "#":("01010","11111","01010","01010","11111","01010","00000"),
+    "%":("11001","11010","00100","01000","10110","00110","00000"),
+}
+
+
+def write_rgba_png(path, width, height, pixels):
+    def chunk(kind, payload):
+        return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xffffffff)
+    rows = b"".join(b"\x00" + bytes(pixels[y * width * 4:(y + 1) * width * 4]) for y in range(height))
+    raw = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+    raw += chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b"")
+    path.write_bytes(raw)
+
+
+def wrapped_text(value, maximum_characters):
+    lines = []
+    for paragraph in str(value or "")[:500].replace("\r", "").split("\n"):
+        lines.extend(textwrap.wrap(paragraph, width=max(1, maximum_characters),
+                                   break_long_words=True, replace_whitespace=False) or [""])
+    return "\n".join(lines)
+
+
+def render_text_png(path, text, font_size, max_width, opacity=1, box_opacity=0,
+                    bold=False, prefer_pillow=True):
+    """Create a transparent text card without relying on an FFmpeg text filter."""
+    font_size = max(10, round(font_size));max_width = max(60, round(max_width))
+    value = wrapped_text(text, max(1, round(max_width / (font_size * .58))))
+    if prefer_pillow:
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            candidates = [
+                "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
+                "/System/Library/Fonts/Supplemental/Helvetica.ttc",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            ]
+            font = next((ImageFont.truetype(name, font_size) for name in candidates if Path(name).is_file()), ImageFont.load_default())
+            probe = Image.new("RGBA", (1, 1));drawer = ImageDraw.Draw(probe)
+            stroke = max(1, round(font_size / 28))
+            left, top, right, bottom = drawer.multiline_textbbox((0, 0), value, font=font, spacing=font_size // 5, stroke_width=stroke)
+            padding = max(5, round(font_size * .28));width=max(2,right-left+padding*2);height=max(2,bottom-top+padding*2)
+            image = Image.new("RGBA", (width, height), (0, 0, 0, round(255 * box_opacity)))
+            drawer = ImageDraw.Draw(image)
+            drawer.multiline_text((padding-left, padding-top), value, font=font, spacing=font_size//5,
+                                  fill=(255,255,255,round(255*opacity)), stroke_width=stroke,
+                                  stroke_fill=(0,0,0,round(230*opacity)), align="center")
+            image.save(path, "PNG")
+            return path, width, height
+        except (ImportError, OSError, StopIteration):
+            pass
+    scale=max(1,round(font_size/7));char_width=6*scale;line_height=9*scale;padding=max(3,2*scale)
+    value=wrapped_text(text,max(1,(max_width-padding*2)//char_width));lines=value.split("\n")
+    width=min(max_width,max(2,max((len(line) for line in lines),default=1)*char_width-scale+padding*2))
+    height=max(2,len(lines)*line_height-2*scale+padding*2);pixels=bytearray(width*height*4)
+    background=(0,0,0,round(255*box_opacity));foreground=(255,255,255,round(255*opacity));shadow=(0,0,0,round(220*opacity))
+    if background[3]:
+        for offset in range(0,len(pixels),4):pixels[offset:offset+4]=bytes(background)
+    def rectangle(x0,y0,x1,y1,color):
+        for yy in range(max(0,y0),min(height,y1)):
+            for xx in range(max(0,x0),min(width,x1)):
+                offset=(yy*width+xx)*4;pixels[offset:offset+4]=bytes(color)
+    def glyph(line_x,line_y,character,color,extra=0):
+        pattern=BITMAP_GLYPHS.get(character.upper(),BITMAP_GLYPHS["?"])
+        for row,bits in enumerate(pattern):
+            for column,bit in enumerate(bits):
+                if bit=="1":rectangle(line_x+column*scale,line_y+row*scale,line_x+(column+1)*scale+extra,line_y+(row+1)*scale,color)
+    for row,line in enumerate(lines):
+        line_width=max(0,len(line)*char_width-scale);start=max(padding,(width-line_width)//2);y=padding+row*line_height
+        for column,character in enumerate(line):
+            x=start+column*char_width;glyph(x+scale,y+scale,character,shadow);glyph(x,y,character,foreground,1 if bold else 0)
+    write_rgba_png(path,width,height,pixels);return path,width,height
 
 
 def output_dimensions(spec):
@@ -309,6 +434,8 @@ def render_piece(clip, index, source, target, width, height, fps, temp, overlay=
             "color=cyan@.9:t=max(2\\,h/180)"
         )
     anchor = str(clip.get("anchorText") or "").strip()
+    anchor_image = None
+    anchor_motion = None
     if anchor:
         tracking_path = tracking.get("path") or []
         focus = tracking.get("focus") or {"x": .5, "y": .35}
@@ -339,7 +466,11 @@ def render_piece(clip, index, source, target, width, height, fps, temp, overlay=
             )
             vf.append(ass_filter(anchor_ass, text_filters))
         else:
-            add_warning(warnings, "Text labels were omitted because this FFmpeg build has no text renderer.")
+            anchor_image, _, _ = render_text_png(
+                temp / f"anchor-{index}.png", anchor, height / 22, width * .45,
+                box_opacity=.45, bold=True,
+            )
+            anchor_motion = (x, y, end_x, end_y)
     vf.append("format=argb" if overlay else "format=yuv420p")
 
     muted = bool(clip.get("mute"))
@@ -360,7 +491,21 @@ def render_piece(clip, index, source, target, width, height, fps, temp, overlay=
     if still or not info.get("hasAudio"):
         command += ["-f", "lavfi", "-t", str(duration), "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
         audio_index = 1
-    command += ["-vf", ",".join(vf), "-af", ",".join(af), "-map", "0:v:0", "-map", f"{audio_index}:a:0"]
+    if anchor_image:
+        anchor_index = 2 if audio_index == 1 else 1
+        command += ["-loop", "1", "-framerate", str(fps), "-t", str(duration), "-i", str(anchor_image)]
+        x, y, end_x, end_y = anchor_motion
+        progress = f"min(t/{max(.05,duration):.6f}\\,1)"
+        graph = (
+            f"[0:v]{','.join(vf)}[basev];[{anchor_index}:v]format=rgba[anchorv];"
+            f"[basev][anchorv]overlay="
+            f"x='main_w*({x:.6f}+({end_x-x:.6f})*{progress})-overlay_w/2':"
+            f"y='main_h*({y:.6f}+({end_y-y:.6f})*{progress})-overlay_h-18':"
+            "eof_action=pass[vout]"
+        )
+        command += ["-filter_complex", graph, "-af", ",".join(af), "-map", "[vout]", "-map", f"{audio_index}:a:0"]
+    else:
+        command += ["-vf", ",".join(vf), "-af", ",".join(af), "-map", "0:v:0", "-map", f"{audio_index}:a:0"]
     command += ["-t", str(duration)]
     if overlay:
         command += ["-c:v", "qtrle", "-pix_fmt", "argb", "-c:a", "pcm_s16le", str(target)]
@@ -465,6 +610,11 @@ def final_codec(spec, capabilities):
 def finish_project(base, spec, media, output, temp, total_duration, text_filters=None, warnings=None):
     text_filters = text_filters or {}
     warnings = warnings if warnings is not None else []
+    title = str(spec.get("title") or "").strip()
+    text_watermark = str(spec.get("watermark") or "").strip()
+    frame_width, frame_height = output_dimensions(spec)
+    builtin_text = not text_filters.get("drawtext") and not (
+        text_filters.get("ass") or text_filters.get("subtitles"))
     command = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(base)]
     input_index = 1
     image_watermark = spec.get("imageWatermark") or {}
@@ -485,10 +635,25 @@ def finish_project(base, spec, media, output, temp, total_duration, text_filters
             voices.append((input_index, voice)); input_index += 1
             command += ["-i", str(media / name)]
 
+    title_image_index = None
+    watermark_text_index = None
+    if builtin_text and title:
+        title_image, _, _ = render_text_png(
+            temp / "project-title.png", title, frame_height / 15, frame_width * .82,
+            box_opacity=.4, bold=True,
+        )
+        title_image_index = input_index;input_index += 1
+        command += ["-loop", "1", "-framerate", str(int(number(spec.get("fps"), 12, 120, 30))), "-i", str(title_image)]
+    if builtin_text and text_watermark:
+        watermark_image, _, _ = render_text_png(
+            temp / "text-watermark.png", text_watermark, frame_height / 28, frame_width * .55,
+            opacity=number(spec.get("watermarkOpacity"), 0, 1, .55),
+        )
+        watermark_text_index = input_index;input_index += 1
+        command += ["-loop", "1", "-framerate", str(int(number(spec.get("fps"), 12, 120, 30))), "-i", str(watermark_image)]
+
     graph = ["[0:v]null[v0]", "[0:a]anull[a0]"]
     video_label = "v0"
-    title = str(spec.get("title") or "").strip()
-    text_watermark = str(spec.get("watermark") or "").strip()
     if text_filters.get("drawtext") and title:
         title_path = write_text_file(temp, "project-title.txt", title)
         graph.append(
@@ -504,7 +669,6 @@ def finish_project(base, spec, media, output, temp, total_duration, text_filters
         ); video_label = "vtextwm"
     if (title or text_watermark) and not text_filters.get("drawtext"):
         if text_filters.get("ass") or text_filters.get("subtitles"):
-            frame_width, frame_height = output_dimensions(spec)
             styles, events = [], []
             if title:
                 styles.append({"name": "Title", "size": frame_height / 15, "bold": True,
@@ -525,9 +689,18 @@ def finish_project(base, spec, media, output, temp, total_duration, text_filters
             graph.append(f"[{video_label}]{ass_filter(text_ass, text_filters)}[vtext]")
             video_label = "vtext"
         else:
-            add_warning(warnings, "Titles and text watermarks were omitted because this FFmpeg build has no text renderer.")
+            if title_image_index is not None:
+                graph.append(f"[{title_image_index}:v]format=rgba[titleimg]")
+                graph.append(
+                    f"[{video_label}][titleimg]overlay=x=(main_w-overlay_w)/2:"
+                    f"y=main_h*.78-overlay_h:enable='between(t,0,{min(5,total_duration):.6f})':eof_action=pass[vtitle]"
+                );video_label = "vtitle"
+            if watermark_text_index is not None:
+                graph.append(f"[{watermark_text_index}:v]format=rgba[textwm]")
+                graph.append(
+                    f"[{video_label}][textwm]overlay=x=main_w-overlay_w-25:y=25:eof_action=pass[vtextwm]"
+                );video_label = "vtextwm"
     if watermark_index is not None:
-        frame_width, _ = output_dimensions(spec)
         scale = number(image_watermark.get("scale"), .03, 1, .2)
         opacity = number(image_watermark.get("opacity"), 0, 1, .7)
         x = number(image_watermark.get("x"), 0, 1, .8)

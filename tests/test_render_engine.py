@@ -50,7 +50,7 @@ class RenderEngineTests(unittest.TestCase):
     def test_text_renderer_prefers_drawtext_then_libass(self):
         self.assertEqual("drawtext", render_engine.text_renderer({"drawtext": True, "ass": True}))
         self.assertEqual("libass", render_engine.text_renderer({"drawtext": False, "ass": True}))
-        self.assertEqual("none", render_engine.text_renderer({}))
+        self.assertEqual("builtin-image", render_engine.text_renderer({}))
 
     def test_all_clip_filter_presets_build_ffmpeg_chains(self):
         presets = {"cinematic", "warm", "cool", "vintage", "mono", "noir", "vivid", "soft", "teal_orange"}
@@ -217,12 +217,33 @@ class RenderEngineTests(unittest.TestCase):
             with mock.patch.object(render_engine, "filter_capabilities", return_value={}):
                 baseline, _ = render_engine.render_project(
                     "no-text", without_text, root, root, lambda *_: None)
+            native_renderer = render_engine.render_text_png
+            def force_dependency_free_renderer(*args, **kwargs):
+                kwargs["prefer_pillow"] = False
+                return native_renderer(*args, **kwargs)
+            builtin_project_spec = copy.deepcopy(spec)
+            builtin_project_spec["clips"][0]["anchorText"] = ""
+            builtin_anchor_spec = copy.deepcopy(spec)
+            builtin_anchor_spec["title"] = ""
+            builtin_anchor_spec["watermark"] = ""
+            with mock.patch.object(render_engine, "filter_capabilities", return_value={}), \
+                    mock.patch.object(render_engine, "render_text_png", side_effect=force_dependency_free_renderer):
+                builtin, builtin_details = render_engine.render_project(
+                    "builtin-project-text", builtin_project_spec, root, root, lambda *_: None)
+                builtin_anchor, _ = render_engine.render_project(
+                    "builtin-anchor-text", builtin_anchor_spec, root, root, lambda *_: None)
             self.assertTrue(output.is_file())
             self.assertGreater(output.stat().st_size, 1000)
             self.assertNotEqual(self.decoded_frame_digest(output, .2),
                                 self.decoded_frame_digest(baseline, .2))
+            self.assertNotEqual(self.decoded_frame_digest(builtin, .2),
+                                self.decoded_frame_digest(baseline, .2))
+            self.assertNotEqual(self.decoded_frame_digest(builtin_anchor, .2),
+                                self.decoded_frame_digest(baseline, .2))
             self.assertEqual("libass", details["textRenderer"])
             self.assertEqual([], details["warnings"])
+            self.assertEqual("builtin-image", builtin_details["textRenderer"])
+            self.assertEqual([], builtin_details["warnings"])
 
 
 if __name__ == "__main__":

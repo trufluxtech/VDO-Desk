@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.4-beta.1
+
+- Fixed opening titles and text overlays being omitted from completed exports.
+- Added a built-in transparent-image text renderer independent of FFmpeg `drawtext` and libass.
+- Added dependency-free bitmap-font rendering when Pillow is not installed.
+- Applied the fallback to project titles, text watermarks and moving tracked labels.
+- Added an end-to-end test that disables every optional FFmpeg text filter and verifies visible exported text.
+
 ## 1.1.3-beta.1
 
 - Added direct drag-and-drop clip movement across the video timeline.

@@ -1,4 +1,4 @@
-# VDODesk 1.1.3 beta 1 scope and implementation map
+# VDODesk 1.1.4 beta 1 scope and implementation map
 
 The original roadmap is implemented in the retained local Python/browser/FFmpeg architecture.
 
@@ -24,6 +24,8 @@ Version 1.1.1 beta 1 fixes browser preview playback for HEVC/MOV and other unsup
 Version 1.1.2 beta 1 fixes export failures on FFmpeg builds without the optional `drawtext` filter. Titles, text watermarks and tracked labels automatically use the compatible libass renderer when necessary.
 
 Version 1.1.3 beta 1 makes timeline clip movement a direct drag-and-drop interaction. V1 clips reorder magnetically, V2/V3 clips move freely with frame snapping, and clips can be moved between video tracks using highlighted drop targets.
+
+Version 1.1.4 beta 1 guarantees text export even when FFmpeg provides neither `drawtext` nor libass. VDODesk renders opening titles, watermarks and tracked labels to transparent images and composites them with the standard video overlay filter. A dependency-free embedded bitmap font remains available when Pillow is not installed.
 
 ## Architecture boundary
 
