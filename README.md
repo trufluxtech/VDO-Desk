@@ -1,4 +1,4 @@
-# VDODesk 1.1.1 beta 1
+# VDODesk 1.1.2 beta 1
 
 <img src="assets/vdodesk-logo.png" alt="VDODesk logo" width="96">
 
@@ -25,6 +25,7 @@ Windows: install Python and FFmpeg on `PATH`, then run `START_WINDOWS.bat`. Opti
 - Linear end keyframes for zoom, focal position, color controls and audio gain.
 - Subject detection, multi-sample template tracking, GrabCut segmentation mask with manual correction, smart reframing, tracked outline and anchored text. OpenCV activates automated analysis; manual fallback is always available.
 - Opening title, text watermark, draggable image watermark, safe-area guides and all five planned aspect-ratio presets.
+- Compatible text export across FFmpeg builds: VDODesk detects `drawtext` and automatically falls back to libass for titles, text watermarks and tracked labels.
 - Per-clip 0–400% audio gain/mute with animated end level, source audio retention, music mix, adjustable/removable browser-microphone voiceovers and automatic sidechain ducking.
 - Audio waveforms, most-recent ten files, automatic browser-compatible H.264 preview proxies for HEVC/MOV and other unsupported media, low-resolution background proxies for large media, and browser/GPU-assisted playback.
 - Background preview/export jobs, autosave and crash recovery (including a previous-project snapshot), complete workspace asset rediscovery/relinking, JSON project save/open.

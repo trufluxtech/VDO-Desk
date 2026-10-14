@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.2-beta.1
+
+- Fixed `No such filter: drawtext` export failures on affected Homebrew FFmpeg builds.
+- Added automatic FFmpeg text-filter detection and a libass fallback for opening titles, text watermarks and tracked labels.
+- Export status now reports the selected text renderer and clearly warns if a minimal FFmpeg build cannot render text.
+
 ## 1.1.1-beta.1
 
 - Fixed blank/non-playing previews for HEVC/MOV and other browser-incompatible source formats.

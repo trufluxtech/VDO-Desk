@@ -16,12 +16,12 @@ import webbrowser
 
 from media_services import (
     analyze_subject, audio_waveform, create_proxy, encoder_capabilities,
-    extract_freeze, ffmpeg_available, probe_media,
+    extract_freeze, ffmpeg_available, filter_capabilities, probe_media,
 )
 from render_engine import number, render_project, safe_name
 
 
-VERSION = "1.1.1-beta.1"
+VERSION = "1.1.2-beta.1"
 ROOT = Path(__file__).resolve().parents[1]
 PROJECTS = ROOT / "projects"
 MEDIA = PROJECTS / "media"
@@ -271,6 +271,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/status":
             try:
                 capabilities = encoder_capabilities()
+                capabilities.update(filter_capabilities())
             except Exception:
                 capabilities = {}
             try:

@@ -35,7 +35,7 @@ const defaultClip = media => ({
   keyframes: {}
 });
 const freshProject = () => ({
-  version: "1.1.1-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
+  version: "1.1.2-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
   watermarkOpacity: .55, imageWatermark: {file:"",opacity:.7,scale:.2,x:.8,y:.08}, safeArea: false,
   clips: [], audio: "", musicVolume: .5, voiceovers: [], audioDucking: true,
   export: {container:"mp4",codec:"h264",width:"",height:"",quality:20,hardware:true,pcmAudio:false}
@@ -320,7 +320,7 @@ async function startRender(previewMode=false){
   if(!project.clips.length)return toast("Add at least one clip");$("#exportDialog").close();toast(previewMode?"Rendering preview…":"Export started…");
   try{const {job}=await api(previewMode?"/api/preview":"/api/render",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(project)});pollJob(job,previewMode)}catch(error){toast(error.message)}
 }
-async function pollJob(job,previewMode){try{const state=await api(`/api/job/${job}`);toast(`${state.message}${state.progress?` · ${state.progress}%`:""}`);if(state.state==="done"){if(previewMode){preview.src=state.url;preview.play();}else{const link=document.createElement("a");link.href=state.url;link.download="";link.click();}return}if(state.state==="error")return;setTimeout(()=>pollJob(job,previewMode),900)}catch(error){toast(error.message)}}
+async function pollJob(job,previewMode){try{const state=await api(`/api/job/${job}`);toast(`${state.message}${state.progress?` · ${state.progress}%`:""}`);if(state.state==="done"){if(previewMode){preview.src=state.url;preview.play().catch(error=>toast(`Preview could not start: ${error.message}`));}else{const link=document.createElement("a");link.href=state.url;link.download="";link.click();}const warnings=state.details?.warnings||[];if(warnings.length)toast(`Export ready · ${warnings.join(" ")}`);return}if(state.state==="error")return;setTimeout(()=>pollJob(job,previewMode),900)}catch(error){toast(error.message)}}
 async function toggleRecording(){
   if(recorder?.state==="recording"){recorder.stop();return}
   try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});recordChunks=[];recorder=new MediaRecorder(stream);recordStart=playheadTime;recorder.ondataavailable=e=>recordChunks.push(e.data);recorder.onstop=async()=>{stream.getTracks().forEach(track=>track.stop());$("#recordButton").classList.remove("recording");$("#recordButton").textContent="● Voiceover";try{const blob=new Blob(recordChunks,{type:recorder.mimeType});const file=new File([blob],`voiceover-${Date.now()}.webm`,{type:blob.type});const item=await uploadFile(file);const duration=await blobDuration(blob),voice={id:uid(),file:item.file,name:item.name,start:recordStart,duration,volume:1};snapshot(true);project.voiceovers.push(voice);selectedVoiceoverId=voice.id;inspectorTab="audio";renderAll();toast("Voiceover added with automatic ducking")}catch(error){toast(error.message)}};recorder.start();$("#recordButton").classList.add("recording");$("#recordButton").textContent="■ Stop recording";toast("Recording voiceover…")}catch(error){toast(`Microphone unavailable: ${error.message}`)}

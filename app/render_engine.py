@@ -7,7 +7,7 @@ import math
 import shutil
 import subprocess
 
-from media_services import encoder_capabilities, probe_media, run
+from media_services import encoder_capabilities, filter_capabilities, probe_media, run
 
 
 TRANSITIONS = {
@@ -39,6 +39,78 @@ def write_text_file(directory: Path, name: str, content: str):
     path = directory / name
     path.write_text(str(content or "")[:500], encoding="utf-8")
     return path
+
+
+def ass_time(seconds):
+    value = max(0, float(seconds or 0))
+    hours = int(value // 3600)
+    minutes = int(value % 3600 // 60)
+    remaining = value % 60
+    return f"{hours}:{minutes:02d}:{remaining:05.2f}"
+
+
+def ass_text(value):
+    """Escape user text so it cannot be interpreted as ASS override markup."""
+    return (str(value or "").replace("\\", "\\\\")
+            .replace("{", "\\{").replace("}", "\\}")
+            .replace("\r\n", "\\N").replace("\r", "\\N").replace("\n", "\\N"))
+
+
+def ass_alpha(opacity):
+    return round((1 - number(opacity, 0, 1, 1)) * 255)
+
+
+def write_ass_file(directory: Path, name: str, width: int, height: int, styles, events):
+    """Write an ASS subtitle document used when drawtext is unavailable."""
+    style_rows = []
+    for style in styles:
+        primary = f"&H{ass_alpha(style.get('opacity', 1)):02X}FFFFFF"
+        outline = f"&H{ass_alpha(style.get('boxOpacity', 0)):02X}000000"
+        style_rows.append(
+            "Style: {name},Arial,{size},{primary},&H000000FF,{outline},&H80000000,"
+            "{bold},0,0,0,100,100,0,0,{border},{border_width},1,2,20,20,20,1".format(
+                name=style["name"], size=max(8, round(style["size"])), primary=primary,
+                outline=outline, bold=-1 if style.get("bold") else 0,
+                border=3 if style.get("box") else 1,
+                border_width=style.get("borderWidth", 2),
+            )
+        )
+    event_rows = [
+        "Dialogue: 0,{start},{end},{style},,0,0,0,,{text}".format(
+            start=ass_time(event.get("start", 0)), end=ass_time(event.get("end", 0)),
+            style=event["style"], text=event["text"],
+        ) for event in events
+    ]
+    document = "\n".join([
+        "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}",
+        "WrapStyle: 2", "ScaledBorderAndShadow: yes", "YCbCr Matrix: TV.709", "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+        *style_rows, "", "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+        *event_rows, "",
+    ])
+    path = directory / name
+    path.write_text(document, encoding="utf-8")
+    return path
+
+
+def ass_filter(path: Path, capabilities):
+    name = "ass" if capabilities.get("ass") else "subtitles"
+    return f"{name}=filename='{escaped_filter_path(path)}'"
+
+
+def text_renderer(capabilities):
+    if capabilities.get("drawtext"):
+        return "drawtext"
+    if capabilities.get("ass") or capabilities.get("subtitles"):
+        return "libass"
+    return "none"
+
+
+def add_warning(warnings, message):
+    if message not in warnings:
+        warnings.append(message)
 
 
 def output_dimensions(spec):
@@ -120,7 +192,10 @@ def clip_filter_chain(clip):
     return []
 
 
-def render_piece(clip, index, source, target, width, height, fps, temp, overlay=False):
+def render_piece(clip, index, source, target, width, height, fps, temp, overlay=False,
+                 text_filters=None, warnings=None):
+    text_filters = text_filters or {}
+    warnings = warnings if warnings is not None else []
     still = clip.get("kind") == "freeze" or source.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
     duration = clip_duration(clip, source)
     speed = number(clip.get("speed"), .25, 4, 1)
@@ -239,17 +314,32 @@ def render_piece(clip, index, source, target, width, height, fps, temp, overlay=
         focus = tracking.get("focus") or {"x": .5, "y": .35}
         first_focus = tracking_path[0] if tracking_path else focus
         last_focus = tracking_path[-1] if tracking_path else focus
-        anchor_path = write_text_file(temp, f"anchor-{index}.txt", anchor)
         x = number(first_focus.get("x"), 0, 1, .5)
         y = number(first_focus.get("y"), 0, 1, .35)
         end_x = number(last_focus.get("x"), 0, 1, x)
         end_y = number(last_focus.get("y"), 0, 1, y)
-        vf.append(
-            f"drawtext=textfile='{escaped_filter_path(anchor_path)}':fontcolor=white:fontsize=h/22:"
-            f"box=1:boxcolor=black@.45:boxborderw=10:"
-            f"x='w*({x:.6f}+({end_x-x:.6f})*min(t/{max(.05,duration):.6f}\\,1))-text_w/2':"
-            f"y='h*({y:.6f}+({end_y-y:.6f})*min(t/{max(.05,duration):.6f}\\,1))-text_h-18'"
-        )
+        if text_filters.get("drawtext"):
+            anchor_path = write_text_file(temp, f"anchor-{index}.txt", anchor)
+            vf.append(
+                f"drawtext=textfile='{escaped_filter_path(anchor_path)}':fontcolor=white:fontsize=h/22:"
+                f"box=1:boxcolor=black@.45:boxborderw=10:"
+                f"x='w*({x:.6f}+({end_x-x:.6f})*min(t/{max(.05,duration):.6f}\\,1))-text_w/2':"
+                f"y='h*({y:.6f}+({end_y-y:.6f})*min(t/{max(.05,duration):.6f}\\,1))-text_h-18'"
+            )
+        elif text_filters.get("ass") or text_filters.get("subtitles"):
+            x0, y0 = round(width * x), round(height * y) - 18
+            x1, y1 = round(width * end_x), round(height * end_y) - 18
+            motion = f"\\move({x0},{y0},{x1},{y1},0,{round(duration * 1000)})"
+            anchor_ass = write_ass_file(
+                temp, f"anchor-{index}.ass", width, height,
+                [{"name": "Anchor", "size": height / 22, "bold": True,
+                  "box": True, "boxOpacity": .45, "borderWidth": 10}],
+                [{"start": 0, "end": duration, "style": "Anchor",
+                  "text": "{\\an2" + motion + "}" + ass_text(anchor)}],
+            )
+            vf.append(ass_filter(anchor_ass, text_filters))
+        else:
+            add_warning(warnings, "Text labels were omitted because this FFmpeg build has no text renderer.")
     vf.append("format=argb" if overlay else "format=yuv420p")
 
     muted = bool(clip.get("mute"))
@@ -372,7 +462,9 @@ def final_codec(spec, capabilities):
     return container, codec, selected
 
 
-def finish_project(base, spec, media, output, temp, total_duration):
+def finish_project(base, spec, media, output, temp, total_duration, text_filters=None, warnings=None):
+    text_filters = text_filters or {}
+    warnings = warnings if warnings is not None else []
     command = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(base)]
     input_index = 1
     image_watermark = spec.get("imageWatermark") or {}
@@ -396,20 +488,44 @@ def finish_project(base, spec, media, output, temp, total_duration):
     graph = ["[0:v]null[v0]", "[0:a]anull[a0]"]
     video_label = "v0"
     title = str(spec.get("title") or "").strip()
-    if title:
+    text_watermark = str(spec.get("watermark") or "").strip()
+    if text_filters.get("drawtext") and title:
         title_path = write_text_file(temp, "project-title.txt", title)
         graph.append(
             f"[{video_label}]drawtext=textfile='{escaped_filter_path(title_path)}':fontcolor=white:fontsize=h/15:"
             "box=1:boxcolor=black@.4:boxborderw=18:x=(w-text_w)/2:y=h*.78:enable='between(t,0,5)'[vtitle]"
         ); video_label = "vtitle"
-    text_watermark = str(spec.get("watermark") or "").strip()
-    if text_watermark:
+    if text_filters.get("drawtext") and text_watermark:
         watermark_path = write_text_file(temp, "text-watermark.txt", text_watermark)
         opacity = number(spec.get("watermarkOpacity"), 0, 1, .55)
         graph.append(
             f"[{video_label}]drawtext=textfile='{escaped_filter_path(watermark_path)}':fontcolor=white@{opacity:.4f}:"
             "fontsize=h/28:x=w-text_w-25:y=25[vtextwm]"
         ); video_label = "vtextwm"
+    if (title or text_watermark) and not text_filters.get("drawtext"):
+        if text_filters.get("ass") or text_filters.get("subtitles"):
+            frame_width, frame_height = output_dimensions(spec)
+            styles, events = [], []
+            if title:
+                styles.append({"name": "Title", "size": frame_height / 15, "bold": True,
+                               "box": True, "boxOpacity": .4, "borderWidth": 18})
+                events.append({
+                    "start": 0, "end": min(5, total_duration), "style": "Title",
+                    "text": f"{{\\an2\\pos({frame_width // 2},{round(frame_height * .78)})}}{ass_text(title)}",
+                })
+            if text_watermark:
+                opacity = number(spec.get("watermarkOpacity"), 0, 1, .55)
+                styles.append({"name": "Watermark", "size": frame_height / 28,
+                               "opacity": opacity, "borderWidth": 1})
+                events.append({
+                    "start": 0, "end": total_duration, "style": "Watermark",
+                    "text": f"{{\\an9\\pos({frame_width - 25},25)}}{ass_text(text_watermark)}",
+                })
+            text_ass = write_ass_file(temp, "project-text.ass", frame_width, frame_height, styles, events)
+            graph.append(f"[{video_label}]{ass_filter(text_ass, text_filters)}[vtext]")
+            video_label = "vtext"
+        else:
+            add_warning(warnings, "Titles and text watermarks were omitted because this FFmpeg build has no text renderer.")
     if watermark_index is not None:
         frame_width, _ = output_dimensions(spec)
         scale = number(image_watermark.get("scale"), .03, 1, .2)
@@ -465,7 +581,9 @@ def finish_project(base, spec, media, output, temp, total_duration):
         command += ["-movflags", "+faststart"]
     command += [str(output)]
     run(command)
-    return {"codec": codec, "container": container, "hardware": "videotoolbox" in codec or "nvenc" in codec}
+    return {"codec": codec, "container": container,
+            "hardware": "videotoolbox" in codec or "nvenc" in codec,
+            "textRenderer": text_renderer(text_filters), "warnings": warnings}
 
 
 def render_project(job, spec, media: Path, output_dir: Path, status_callback):
@@ -479,6 +597,8 @@ def render_project(job, spec, media: Path, output_dir: Path, status_callback):
     temp = output_dir / f"temp-{job}"
     temp.mkdir(parents=True, exist_ok=False)
     try:
+        text_filters = filter_capabilities()
+        warnings = []
         primary, overlays = [], []
         primary_clips, primary_durations = [], []
         for index, clip in enumerate(clips):
@@ -487,7 +607,8 @@ def render_project(job, spec, media: Path, output_dir: Path, status_callback):
                 raise ValueError("Missing source clip: " + source.name)
             is_overlay = int(number(clip.get("track"), 0, 8, 0)) > 0
             piece = temp / (f"overlay-{index:03}.mov" if is_overlay else f"clip-{index:03}.mp4")
-            duration = render_piece(clip, index, source, piece, width, height, fps, temp, is_overlay)
+            duration = render_piece(clip, index, source, piece, width, height, fps, temp, is_overlay,
+                                    text_filters, warnings)
             if is_overlay:
                 overlays.append({"path": piece, "start": number(clip.get("timelineStart"), 0, 86400, 0), "duration": duration})
             else:
@@ -504,7 +625,7 @@ def render_project(job, spec, media: Path, output_dir: Path, status_callback):
         container = str(export.get("container") or "mp4").lower()
         if container not in {"mp4", "mov", "webm"}: container = "mp4"
         output = output_dir / f"VDODesk-{job}.{container}"
-        details = finish_project(composite, spec, media, output, temp, total)
+        details = finish_project(composite, spec, media, output, temp, total, text_filters, warnings)
         status_callback(100, "Export ready")
         return output, details
     finally:

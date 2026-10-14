@@ -1,4 +1,4 @@
-# VDODesk 1.1.1 beta 1 scope and implementation map
+# VDODesk 1.1.2 beta 1 scope and implementation map
 
 The original roadmap is implemented in the retained local Python/browser/FFmpeg architecture.
 
@@ -20,6 +20,8 @@ The original roadmap is implemented in the retained local Python/browser/FFmpeg 
 Version 1.1 beta 1 adds explicit video sequencing controls, numbered timeline clips, selected-clip filter presets and the new VDODesk application logo. It retains the sidechain, undo grouping, continuous ruler scrubbing, crop constraints and export compatibility fixes from version 1.0 beta 1.
 
 Version 1.1.1 beta 1 fixes browser preview playback for HEVC/MOV and other unsupported source formats by detecting codecs, generating H.264/AAC proxies automatically, polling until the proxy is ready, and retrying playback. Terminal shutdown with Ctrl+C now exits without a Python traceback.
+
+Version 1.1.2 beta 1 fixes export failures on FFmpeg builds without the optional `drawtext` filter. Titles, text watermarks and tracked labels automatically use the compatible libass renderer when necessary.
 
 ## Architecture boundary
 

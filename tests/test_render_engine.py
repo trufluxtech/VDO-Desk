@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -45,6 +46,11 @@ class RenderEngineTests(unittest.TestCase):
                          render_engine.final_codec({"export": {"container": "mp4", "codec": "vp9"}}, capabilities))
         self.assertEqual(("mp4", "h264", "libx264"),
                          render_engine.final_codec({"export": {"container": "invalid", "codec": "invalid"}}, capabilities))
+
+    def test_text_renderer_prefers_drawtext_then_libass(self):
+        self.assertEqual("drawtext", render_engine.text_renderer({"drawtext": True, "ass": True}))
+        self.assertEqual("libass", render_engine.text_renderer({"drawtext": False, "ass": True}))
+        self.assertEqual("none", render_engine.text_renderer({}))
 
     def test_all_clip_filter_presets_build_ffmpeg_chains(self):
         presets = {"cinematic", "warm", "cool", "vintage", "mono", "noir", "vivid", "soft", "teal_orange"}
@@ -174,6 +180,49 @@ class RenderEngineTests(unittest.TestCase):
             ], check=True, capture_output=True, text=True).stdout
             self.assertIn('"codec_type": "video"', probe)
             self.assertIn('"codec_type": "audio"', probe)
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg is required")
+    def test_title_export_falls_back_to_libass_without_drawtext(self):
+        available = render_engine.filter_capabilities()
+        if not (available.get("ass") or available.get("subtitles")):
+            self.skipTest("libass text filter is required")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.mp4"
+            subprocess.run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                "color=c=navy:s=160x90:r=20:d=0.5", "-f", "lavfi", "-i",
+                "anullsrc=channel_layout=stereo:sample_rate=48000", "-shortest", "-t", "0.5",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(source),
+            ], check=True)
+            spec = {
+                "ratio": "16:9", "fps": 20,
+                "clips": [{"file": source.name, "track": 0, "start": 0, "end": .45, "speed": 1,
+                           "anchorText": "Tracked label",
+                           "tracking": {"focus": {"x": .5, "y": .4},
+                                        "path": [{"x": .35, "y": .4}, {"x": .65, "y": .4}]}}],
+                "title": "Opening title", "watermark": "VDODesk",
+                "export": {"container": "mp4", "codec": "h264", "width": 320,
+                           "height": 180, "hardware": False, "quality": 32},
+            }
+            fallback = {"drawtext": False, "ass": available.get("ass", False),
+                        "subtitles": available.get("subtitles", False)}
+            with mock.patch.object(render_engine, "filter_capabilities", return_value=fallback):
+                output, details = render_engine.render_project(
+                    "ass-fallback", spec, root, root, lambda *_: None)
+            without_text = copy.deepcopy(spec)
+            without_text["title"] = ""
+            without_text["watermark"] = ""
+            without_text["clips"][0]["anchorText"] = ""
+            with mock.patch.object(render_engine, "filter_capabilities", return_value={}):
+                baseline, _ = render_engine.render_project(
+                    "no-text", without_text, root, root, lambda *_: None)
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 1000)
+            self.assertNotEqual(self.decoded_frame_digest(output, .2),
+                                self.decoded_frame_digest(baseline, .2))
+            self.assertEqual("libass", details["textRenderer"])
+            self.assertEqual([], details["warnings"])
 
 
 if __name__ == "__main__":

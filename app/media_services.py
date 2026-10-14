@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from array import array
+from functools import lru_cache
 from pathlib import Path
 import json
 import math
@@ -56,6 +57,23 @@ def encoder_capabilities():
         "hevcNvenc": "hevc_nvenc" in text,
         "vp9": "libvpx-vp9" in text,
         "h265": "libx265" in text,
+    }
+
+
+@lru_cache(maxsize=1)
+def filter_capabilities():
+    """Report optional FFmpeg filters used by VDODesk exports."""
+    result = run(["ffmpeg", "-hide_banner", "-filters"], timeout=30)
+    text = result.stdout.decode("utf-8", "replace") + result.stderr.decode("utf-8", "replace")
+    names = set()
+    for line in text.splitlines():
+        columns = line.split()
+        if len(columns) >= 2 and len(columns[0]) == 3:
+            names.add(columns[1])
+    return {
+        "drawtext": "drawtext" in names,
+        "ass": "ass" in names,
+        "subtitles": "subtitles" in names,
     }
 
 
