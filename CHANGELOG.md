@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.3-beta.1
+
+- Added direct drag-and-drop clip movement across the video timeline.
+- V1 clips now reorder magnetically at the visible insertion point.
+- V2/V3 clips move freely with frame snapping and can be dragged between video tracks.
+- Added highlighted drop lanes, an insertion marker, drag ghost styling and horizontal edge auto-scroll.
+- Fixed pointer capture and timeline-coordinate errors that could prevent a drag from completing after scrolling or rerendering.
+
 ## 1.1.2-beta.1
 
 - Fixed `No such filter: drawtext` export failures on affected Homebrew FFmpeg builds.

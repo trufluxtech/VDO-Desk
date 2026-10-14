@@ -35,7 +35,7 @@ const defaultClip = media => ({
   keyframes: {}
 });
 const freshProject = () => ({
-  version: "1.1.2-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
+  version: "1.1.3-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
   watermarkOpacity: .55, imageWatermark: {file:"",opacity:.7,scale:.2,x:.8,y:.08}, safeArea: false,
   clips: [], audio: "", musicVolume: .5, voiceovers: [], audioDucking: true,
   export: {container:"mp4",codec:"h264",width:"",height:"",quality:20,hardware:true,pcmAudio:false}
@@ -45,6 +45,7 @@ let project = freshProject();
 let media = [], recent = [], selectedClipId = "", selectedVoiceoverId = "", selectedMediaFile = "", libraryView = "project", inspectorTab = "clip";
 let history = [], future = [], playheadTime = 0, isPlayingTimeline = false, saveTimer, toastTimer, waveformCache = new Map();
 let audioContext, previewSource, previewGain, recorder, recordChunks = [], recordStart = 0;
+let suppressTimelineClick = false;
 const proxyRequests = new Map();
 const preview = $("#preview"), stillPreview = $("#stillPreview"), stage = $("#stage");
 
@@ -328,6 +329,7 @@ async function toggleRecording(){
 function blobDuration(blob){return new Promise(resolve=>{const audio=document.createElement("audio");audio.preload="metadata";audio.onloadedmetadata=()=>{URL.revokeObjectURL(audio.src);resolve(Number.isFinite(audio.duration)?audio.duration:3)};audio.src=URL.createObjectURL(blob)});}
 
 document.addEventListener("click",event=>{
+  if(suppressTimelineClick){suppressTimelineClick=false;event.preventDefault();return}
   const actionNode=event.target.closest("[data-action]");if(actionNode){event.preventDefault();action(actionNode.dataset.action);return}
   const filterNode=event.target.closest("[data-filter]");if(filterNode){event.preventDefault();const clip=selectedClip();if(clip)pushChange(()=>{clip.filter=filterNode.dataset.filter;clip.filterIntensity=clip.filterIntensity??1});return}
   const add=event.target.closest("[data-add]");if(add){event.stopPropagation();addMediaToTimeline(mediaByFile(add.dataset.add));return}
@@ -356,9 +358,109 @@ timelineScroll.addEventListener("pointerup",event=>{if(timelineScrubbing&&timeli
 timelineScroll.addEventListener("pointercancel",()=>{timelineScrubbing=false});
 
 let dragState=null;
-$("#tracks").addEventListener("pointerdown",event=>{const clipNode=event.target.closest("[data-clip]");if(!clipNode)return;const clip=project.clips.find(c=>c.id===clipNode.dataset.clip);selectedClipId=clip.id;const side=event.target.classList.contains("left")?"left":event.target.classList.contains("right")?"right":"move";dragState={clip,startX:event.clientX,original:structuredClone(clip),side};snapshot(true);clipNode.setPointerCapture(event.pointerId);event.preventDefault()});
-$("#tracks").addEventListener("pointermove",event=>{if(!dragState)return;const delta=(event.clientX-dragState.startX)/Number($("#timelineZoom").value),{clip,original,side}=dragState;if(side==="left"&&clip.kind!=="freeze"){clip.start=clamp(original.start+delta*original.speed,0,original.end-.05)}else if(side==="right"&&clip.kind!=="freeze"){clip.end=Math.max(original.start+.05,original.end+delta*original.speed)}else if(side==="right"){clip.duration=Math.max(.1,original.duration+delta)}else if(Number(clip.track)>0){clip.timelineStart=Math.max(0,original.timelineStart+delta)}renderTimeline();loadSelectedPreview(false)});
-$("#tracks").addEventListener("pointerup",event=>{if(!dragState)return;const target=document.elementFromPoint(event.clientX,event.clientY)?.closest("[data-track]");if(target&&!["audio","voice"].includes(target.dataset.track)){const newTrack=Number(target.dataset.track),clip=dragState.clip;if(newTrack!==Number(clip.track)){clip.track=newTrack;if(newTrack>0)clip.timelineStart=Math.max(0,playheadTime)}if(newTrack===0&&dragState.side==="move"){const lane=target.querySelector(".track-lane").getBoundingClientRect(),x=(event.clientX-lane.left+target.closest(".timeline-scroll").scrollLeft)/Number($("#timelineZoom").value),others=primaryClips().filter(item=>item!==clip),layout=timelineLayout().map;let targetIndex=others.findIndex(item=>x<(layout.get(item)?.start||0)+durationOf(item)/2);if(targetIndex<0)targetIndex=others.length;project.clips=project.clips.filter(item=>item!==clip);const absolute=project.clips.indexOf(others[targetIndex]||project.clips.find(item=>Number(item.track)>0));project.clips.splice(absolute<0?project.clips.length:absolute,0,clip)}}dragState=null;renderAll()});
+const tracks=$("#tracks");
+function videoTrackAtPoint(x,y){
+  const track=document.elementFromPoint(x,y)?.closest("[data-track]");
+  return track&&["0","1","2"].includes(track.dataset.track)?track:null;
+}
+function timelineTimeAtPoint(x,track){
+  const lane=track.querySelector(".track-lane").getBoundingClientRect();
+  return Math.max(0,(x-lane.left)/Number($("#timelineZoom").value));
+}
+function primaryDropIndex(clip,time){
+  const others=primaryClips().filter(item=>item!==clip),layout=timelineLayout().map;
+  const index=others.findIndex(item=>time<(layout.get(item)?.start||0)+durationOf(item)/2);
+  return index<0?others.length:index;
+}
+function moveClipToPrimaryIndex(clip,index){
+  const remaining=project.clips.filter(item=>item!==clip),sequence=remaining.filter(item=>Number(item.track)===0);
+  const target=Math.max(0,Math.min(sequence.length,index));clip.track=0;clip.timelineStart=0;
+  let absolute;
+  if(target<sequence.length)absolute=remaining.indexOf(sequence[target]);
+  else if(sequence.length)absolute=remaining.indexOf(sequence.at(-1))+1;
+  else absolute=0;
+  remaining.splice(absolute,0,clip);project.clips=remaining;
+}
+function beginTimelineChange(){
+  if(!dragState||dragState.changed)return;
+  history.push(dragState.beforeProject);if(history.length>60)history.shift();future=[];dragState.changed=true;
+}
+function clearTimelineDropTarget(){
+  $$(".track.drop-target").forEach(node=>node.classList.remove("drop-target"));
+  $("#timelineDropIndicator")?.remove();
+}
+function clearTimelineDropUI(){
+  clearTimelineDropTarget();
+  if(dragState?.node){dragState.node.classList.remove("dragging");dragState.node.style.transform=""}
+}
+function showTimelineDropUI(event,target){
+  $$(".track.drop-target").forEach(node=>node.classList.toggle("drop-target",node===target));
+  let marker=$("#timelineDropIndicator");if(!marker){marker=document.createElement("i");marker.id="timelineDropIndicator";marker.className="timeline-drop-indicator"}
+  const lane=target.querySelector(".track-lane"),rect=lane.getBoundingClientRect();lane.append(marker);
+  marker.style.left=`${Math.max(0,Math.min(rect.width,event.clientX-rect.left))}px`;
+}
+function restoreDraggedClip(){
+  const clip=dragState.clip,original=dragState.original;
+  Object.keys(clip).forEach(key=>delete clip[key]);Object.assign(clip,structuredClone(original));
+}
+tracks.addEventListener("pointerdown",event=>{
+  const clipNode=event.target.closest("[data-clip]");if(!clipNode)return;
+  const sourceTrack=clipNode.closest("[data-track]")?.dataset.track;
+  if(sourceTrack==="audio")return toast("Drag the corresponding video clip on V1");
+  const clip=project.clips.find(c=>c.id===clipNode.dataset.clip);if(!clip)return;
+  const side=event.target.classList.contains("left")?"left":event.target.classList.contains("right")?"right":"move";
+  const layout=timelineLayout().map.get(clip.id),sourceTrackNode=clipNode.closest("[data-track]");
+  const pointerTime=timelineTimeAtPoint(event.clientX,sourceTrackNode);
+  selectedClipId=clip.id;selectedVoiceoverId="";
+  dragState={clip,node:clipNode,startX:event.clientX,startY:event.clientY,original:structuredClone(clip),
+    beforeProject:JSON.stringify(project),side,pointerId:event.pointerId,moved:false,changed:false,
+    grabOffset:Math.max(0,pointerTime-(layout?.start||0))};
+  tracks.setPointerCapture(event.pointerId);if(side==="move")clipNode.classList.add("dragging");
+  event.preventDefault();
+});
+tracks.addEventListener("pointermove",event=>{
+  if(!dragState)return;
+  const pixelDelta=event.clientX-dragState.startX,delta=pixelDelta/Number($("#timelineZoom").value),{clip,original,side}=dragState;
+  if(Math.hypot(pixelDelta,event.clientY-dragState.startY)>3)dragState.moved=true;
+  if(side!=="move"){
+    if(Math.abs(pixelDelta)<1)return;beginTimelineChange();
+    if(side==="left"&&clip.kind!=="freeze")clip.start=clamp(original.start+delta*original.speed,0,original.end-.05);
+    else if(side==="right"&&clip.kind!=="freeze")clip.end=Math.max(original.start+.05,original.end+delta*original.speed);
+    else if(side==="right")clip.duration=Math.max(.1,original.duration+delta);
+    renderTimeline();loadSelectedPreview(false);return;
+  }
+  const bounds=timelineScroll.getBoundingClientRect();
+  if(event.clientX<bounds.left+45)timelineScroll.scrollLeft=Math.max(0,timelineScroll.scrollLeft-14);
+  else if(event.clientX>bounds.right-45)timelineScroll.scrollLeft+=14;
+  dragState.node.style.transform=`translate(${pixelDelta}px,${event.clientY-dragState.startY}px)`;
+  const target=videoTrackAtPoint(event.clientX,event.clientY);if(target)showTimelineDropUI(event,target);else clearTimelineDropTarget();
+  event.preventDefault();
+});
+function finishTimelineDrag(event,cancelled=false){
+  if(!dragState)return;
+  const state=dragState,target=!cancelled&&state.side==="move"?videoTrackAtPoint(event.clientX,event.clientY):null;
+  clearTimelineDropUI();
+  if(cancelled){if(state.changed)restoreDraggedClip()}
+  else if(state.side==="move"&&state.moved&&target){
+    const targetTrack=Number(target.dataset.track),dropTime=timelineTimeAtPoint(event.clientX,target);
+    if(targetTrack===0){
+      const targetIndex=primaryDropIndex(state.clip,dropTime),currentIndex=primaryClips().indexOf(state.clip);
+      if(targetIndex!==currentIndex||Number(state.clip.track)!==0){beginTimelineChange();moveClipToPrimaryIndex(state.clip,targetIndex)}
+    }else{
+      const newStart=Math.round(Math.max(0,dropTime-state.grabOffset)*project.fps)/project.fps;
+      if(targetTrack!==Number(state.clip.track)||Math.abs(newStart-Number(state.clip.timelineStart||0))>.0001){
+        beginTimelineChange();state.clip.track=targetTrack;state.clip.timelineStart=newStart;
+      }
+    }
+  }
+  if(tracks.hasPointerCapture(state.pointerId))tracks.releasePointerCapture(state.pointerId);
+  const changed=state.changed,moved=state.moved;dragState=null;
+  if(changed)snapshot(false);renderAll();
+  if(moved){suppressTimelineClick=true;setTimeout(()=>{suppressTimelineClick=false},0)}
+  if(changed&&state.side==="move")toast(Number(state.clip.track)===0?"Clip reordered on V1":"Clip moved on timeline");
+}
+tracks.addEventListener("pointerup",event=>finishTimelineDrag(event));
+tracks.addEventListener("pointercancel",event=>finishTimelineDrag(event,true));
 
 const dropZone=$("#dropZone");["dragenter","dragover"].forEach(type=>dropZone.addEventListener(type,event=>{event.preventDefault();dropZone.classList.add("drag")}));["dragleave","drop"].forEach(type=>dropZone.addEventListener(type,event=>{event.preventDefault();dropZone.classList.remove("drag")}));dropZone.addEventListener("drop",event=>importFiles(event.dataTransfer.files));
 let watermarkDrag=null;$("#imageWatermark").addEventListener("pointerdown",event=>{watermarkDrag={x:event.clientX,y:event.clientY,ox:project.imageWatermark.x,oy:project.imageWatermark.y};event.target.setPointerCapture(event.pointerId)});$("#imageWatermark").addEventListener("pointermove",event=>{if(!watermarkDrag)return;const rect=stage.getBoundingClientRect();project.imageWatermark.x=clamp(watermarkDrag.ox+(event.clientX-watermarkDrag.x)/rect.width,0,1-project.imageWatermark.scale);project.imageWatermark.y=clamp(watermarkDrag.oy+(event.clientY-watermarkDrag.y)/rect.height,0,1-project.imageWatermark.scale);applyPreviewEffects()});$("#imageWatermark").addEventListener("pointerup",()=>{if(watermarkDrag)snapshot(false);watermarkDrag=null;renderInspector()});

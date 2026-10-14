@@ -1,4 +1,4 @@
-# VDODesk 1.1.2 beta 1
+# VDODesk 1.1.3 beta 1
 
 <img src="assets/vdodesk-logo.png" alt="VDODesk logo" width="96">
 
@@ -17,7 +17,7 @@ Windows: install Python and FFmpeg on `PATH`, then run `START_WINDOWS.bat`. Opti
 
 ## Implemented editor features
 
-- Magnetic V1 timeline with numbered video sequencing, drag-to-reorder plus explicit Earlier/Later controls, V2/V3 overlay tracks, source-audio and voiceover lanes; drag either edge to trim, split, duplicate, freeze frame, undo/redo, click/drag scrubbing and frame-step.
+- Magnetic V1 timeline with numbered video sequencing and direct drag-and-drop reordering; V2/V3 clips can be dragged freely in time or moved between video tracks. Includes visible drop targets, frame snapping, edge auto-scroll, Earlier/Later controls, source-audio and voiceover lanes, edge trimming, split, duplicate, freeze frame, undo/redo, scrubbing and frame-step.
 - Cross dissolve, fade, wipe, slide and zoom transitions with adjustable duration.
 - Crop, overlay positioning/scaling, rotation, zoom, mirror, opacity, stabilization and focal-point controls.
 - Brightness, contrast, saturation, gamma, temperature, tint, hue, shadows/highlights and `.cube` 3D LUT support.

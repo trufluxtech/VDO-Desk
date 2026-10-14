@@ -21,7 +21,7 @@ from media_services import (
 from render_engine import number, render_project, safe_name
 
 
-VERSION = "1.1.2-beta.1"
+VERSION = "1.1.3-beta.1"
 ROOT = Path(__file__).resolve().parents[1]
 PROJECTS = ROOT / "projects"
 MEDIA = PROJECTS / "media"
