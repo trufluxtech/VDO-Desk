@@ -1,4 +1,4 @@
-# VDODesk 1.1.0 beta 1
+# VDODesk 1.1.1 beta 1
 
 <img src="assets/vdodesk-logo.png" alt="VDODesk logo" width="96">
 
@@ -26,7 +26,7 @@ Windows: install Python and FFmpeg on `PATH`, then run `START_WINDOWS.bat`. Opti
 - Subject detection, multi-sample template tracking, GrabCut segmentation mask with manual correction, smart reframing, tracked outline and anchored text. OpenCV activates automated analysis; manual fallback is always available.
 - Opening title, text watermark, draggable image watermark, safe-area guides and all five planned aspect-ratio presets.
 - Per-clip 0–400% audio gain/mute with animated end level, source audio retention, music mix, adjustable/removable browser-microphone voiceovers and automatic sidechain ducking.
-- Audio waveforms, most-recent ten files, low-resolution background proxy generation for large media and browser/GPU-assisted playback.
+- Audio waveforms, most-recent ten files, automatic browser-compatible H.264 preview proxies for HEVC/MOV and other unsupported media, low-resolution background proxies for large media, and browser/GPU-assisted playback.
 - Background preview/export jobs, autosave and crash recovery (including a previous-project snapshot), complete workspace asset rediscovery/relinking, JSON project save/open.
 - MP4, MOV and WebM containers; H.264, H.265/HEVC and VP9; custom dimensions and quality; Apple VideoToolbox hardware encoding when available with software fallback.
 
@@ -34,7 +34,7 @@ Windows: install Python and FFmpeg on `PATH`, then run `START_WINDOWS.bat`. Opti
 
 Import media → use `+` to add clips → arrange and trim the timeline → edit the selected clip in the Inspector → use **Render preview** for full compositing → **Export**. Outputs are also retained in `projects/exports/`.
 
-The live browser preview is designed for responsive editing and visibly approximates every color control, crop, keyframes, transforms and animated audio level. **Render preview** and final export use the same FFmpeg project renderer and are the parity reference. Background proxy creation begins automatically for video files larger than 40 MB; reselecting an item after completion makes its proxy available.
+The live browser preview is designed for responsive editing and visibly approximates every color control, crop, keyframes, transforms and animated audio level. **Render preview** and final export use the same FFmpeg project renderer and are the parity reference. VDODesk detects formats the browser cannot decode—commonly HEVC camera footage in `.mov` files—and automatically creates an H.264/AAC proxy, switches the selected clip to it, and retries playback. Large files also receive a lower-resolution proxy in the background.
 
 ## Projects and recovery
 

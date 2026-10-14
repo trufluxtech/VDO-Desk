@@ -27,6 +27,8 @@ class MediaServicesTests(unittest.TestCase):
             info = media_services.probe_media(source)
             self.assertEqual("video", info["kind"])
             self.assertTrue(info["hasAudio"])
+            self.assertEqual("h264", info["videoCodec"])
+            self.assertTrue(info["browserPlayable"])
             peaks = media_services.audio_waveform(source, 64)
             self.assertEqual(64, len(peaks))
             self.assertGreater(max(peaks), .01)

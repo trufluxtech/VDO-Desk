@@ -65,6 +65,14 @@ class RecentFilesTests(unittest.TestCase):
         self.assertEqual("evil_.mp4", server.clean_filename("evil?.mp4"))
         self.assertEqual("clip.mp4", server.safe_name("../../clip.mp4"))
 
+    def test_incompatible_or_large_video_requires_preview_proxy(self):
+        source = server.MEDIA / "clip.mov"
+        source.write_bytes(b"video")
+        self.assertTrue(server.preview_proxy_required(
+            {"kind": "video", "browserPlayable": False}, source))
+        self.assertFalse(server.preview_proxy_required(
+            {"kind": "video", "browserPlayable": True}, source))
+
 
 if __name__ == "__main__":
     unittest.main()

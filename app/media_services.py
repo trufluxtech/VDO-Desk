@@ -20,19 +20,29 @@ def run(command, timeout=1200):
 def probe_media(path: Path):
     result = run([
         "ffprobe", "-v", "error", "-show_entries",
-        "format=duration:stream=codec_type,width,height,r_frame_rate",
+        "format=duration,format_name:stream=codec_type,codec_name,width,height,r_frame_rate",
         "-of", "json", str(path),
     ], timeout=30)
     payload = json.loads(result.stdout.decode("utf-8"))
     streams = payload.get("streams", [])
     video = next((item for item in streams if item.get("codec_type") == "video"), None)
     audio = next((item for item in streams if item.get("codec_type") == "audio"), None)
+    video_codec = str((video or {}).get("codec_name") or "").lower()
+    audio_codec = str((audio or {}).get("codec_name") or "").lower()
+    suffix = path.suffix.lower()
+    browser_playable = bool(video) and (
+        (suffix in {".mp4", ".m4v"} and video_codec == "h264" and audio_codec in {"", "aac", "mp3"})
+        or (suffix == ".webm" and video_codec in {"vp8", "vp9", "av1"} and audio_codec in {"", "opus", "vorbis"})
+    )
     return {
         "duration": float(payload.get("format", {}).get("duration") or 0),
         "kind": "video" if video else "audio",
         "hasAudio": bool(audio),
         "width": int((video or {}).get("width") or 0),
         "height": int((video or {}).get("height") or 0),
+        "videoCodec": video_codec,
+        "audioCodec": audio_codec,
+        "browserPlayable": browser_playable,
     }
 
 

@@ -21,7 +21,7 @@ from media_services import (
 from render_engine import number, render_project, safe_name
 
 
-VERSION = "1.1.0-beta.1"
+VERSION = "1.1.1-beta.1"
 ROOT = Path(__file__).resolve().parents[1]
 PROJECTS = ROOT / "projects"
 MEDIA = PROJECTS / "media"
@@ -35,6 +35,8 @@ for folder in (MEDIA, OUTPUT, PROXIES, ANALYSIS):
 STATUS = {}
 LOCK = threading.Lock()
 RECENT_LOCK = threading.Lock()
+PROXY_LOCK = threading.Lock()
+PROXY_JOBS = set()
 MEDIA_EXTENSIONS = {
     ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".mpg", ".mpeg",
     ".mp3", ".wav", ".aac", ".m4a", ".flac", ".ogg", ".opus",
@@ -51,7 +53,8 @@ def clean_filename(value, fallback="upload.bin"):
 
 def media_item(path, display_name=None):
     suffix = path.suffix.lower()
-    info = {"duration": 0, "kind": "file", "hasAudio": False, "width": 0, "height": 0}
+    info = {"duration": 0, "kind": "file", "hasAudio": False, "width": 0, "height": 0,
+            "videoCodec": "", "audioCodec": "", "browserPlayable": True}
     if suffix == ".cube":
         info["kind"] = "lut"
     elif suffix in IMAGE_EXTENSIONS:
@@ -68,7 +71,11 @@ def media_item(path, display_name=None):
         "hasAudio": info["hasAudio"],
         "width": info["width"],
         "height": info["height"],
+        "videoCodec": info["videoCodec"],
+        "audioCodec": info["audioCodec"],
+        "browserPlayable": info["browserPlayable"],
         "proxy": "/proxies/" + proxy.name if proxy.is_file() else "",
+        "proxyPending": path.name in PROXY_JOBS,
         "importedAt": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
     }
 
@@ -158,14 +165,35 @@ def remember_file(path, display_name, duration=None):
     return entry
 
 
+def preview_proxy_required(item, source):
+    return item.get("kind") == "video" and (
+        not item.get("browserPlayable", False) or source.stat().st_size > 40_000_000
+    )
+
+
 def build_proxy_background(source, target):
     try:
-        create_proxy(source, target, hardware=True)
-    except Exception:
         try:
-            create_proxy(source, target, hardware=False)
+            create_proxy(source, target, hardware=True)
         except Exception:
-            return
+            create_proxy(source, target, hardware=False)
+    except Exception as error:
+        print(f"Preview proxy failed for {source.name}: {error}", flush=True)
+    finally:
+        with PROXY_LOCK:
+            PROXY_JOBS.discard(source.name)
+
+
+def start_proxy_background(source):
+    target = PROXIES / f"{source.stem}.proxy.mp4"
+    if target.is_file():
+        return False
+    with PROXY_LOCK:
+        if source.name in PROXY_JOBS:
+            return True
+        PROXY_JOBS.add(source.name)
+    threading.Thread(target=build_proxy_background, args=(source, target), daemon=True).start()
+    return True
 
 
 def update_status(job, progress, message, **extra):
@@ -307,11 +335,22 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as error:
                 target.unlink(missing_ok=True)
                 return self.json_response(400, {"error": str(error)})
-            if item["kind"] == "video" and target.stat().st_size > 40_000_000:
-                proxy = PROXIES / f"{target.stem}.proxy.mp4"
-                threading.Thread(target=build_proxy_background, args=(target, proxy), daemon=True).start()
-                item["proxyPending"] = True
+            if preview_proxy_required(item, target):
+                item["proxyPending"] = start_proxy_background(target)
             return self.json_response(200, item)
+        if path == "/api/proxy":
+            try:
+                body = self.read_json()
+                source = MEDIA / safe_name(body.get("file"))
+                if not source.is_file():
+                    raise ValueError("Missing source media")
+                item = media_item(source)
+                if item["kind"] != "video":
+                    raise ValueError("Preview proxies are available for video clips")
+                item["proxyPending"] = start_proxy_background(source)
+                return self.json_response(200, item)
+            except Exception as error:
+                return self.json_response(400, {"error": str(error)})
         if path == "/api/freeze":
             try:
                 body = self.read_json()
@@ -365,4 +404,10 @@ if __name__ == "__main__":
     url = f"http://127.0.0.1:{arguments.port}"
     print(f"VDODesk {VERSION} ready at {url}", flush=True)
     threading.Timer(1, lambda: webbrowser.open(url)).start()
-    ThreadingHTTPServer(("127.0.0.1", arguments.port), Handler).serve_forever()
+    server = ThreadingHTTPServer(("127.0.0.1", arguments.port), Handler)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nVDODesk stopped.", flush=True)
+    finally:
+        server.server_close()

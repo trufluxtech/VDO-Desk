@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.1-beta.1
+
+- Fixed blank/non-playing previews for HEVC/MOV and other browser-incompatible source formats.
+- Added codec detection, automatic H.264/AAC preview-proxy creation, readiness polling and playback retry.
+- Added visible preview errors instead of silent rejected browser playback promises.
+- Added clean Ctrl+C shutdown without a `KeyboardInterrupt` traceback.
+
 ## 1.1.0-beta.1
 
 - Added numbered V1 video sequencing with drag-to-reorder and explicit Earlier/Later controls.

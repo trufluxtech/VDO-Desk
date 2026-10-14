@@ -35,7 +35,7 @@ const defaultClip = media => ({
   keyframes: {}
 });
 const freshProject = () => ({
-  version: "1.1.0-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
+  version: "1.1.1-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
   watermarkOpacity: .55, imageWatermark: {file:"",opacity:.7,scale:.2,x:.8,y:.08}, safeArea: false,
   clips: [], audio: "", musicVolume: .5, voiceovers: [], audioDucking: true,
   export: {container:"mp4",codec:"h264",width:"",height:"",quality:20,hardware:true,pcmAudio:false}
@@ -45,6 +45,7 @@ let project = freshProject();
 let media = [], recent = [], selectedClipId = "", selectedVoiceoverId = "", selectedMediaFile = "", libraryView = "project", inspectorTab = "clip";
 let history = [], future = [], playheadTime = 0, isPlayingTimeline = false, saveTimer, toastTimer, waveformCache = new Map();
 let audioContext, previewSource, previewGain, recorder, recordChunks = [], recordStart = 0;
+const proxyRequests = new Map();
 const preview = $("#preview"), stillPreview = $("#stillPreview"), stage = $("#stage");
 
 function snapshot(pushHistory=true){
@@ -84,6 +85,38 @@ async function api(path, options={}){
   if(!response.ok) throw new Error(value.error||"Request failed"); return value;
 }
 async function refreshRecent(){try{recent=(await api("/api/recent")).items||[]; if(libraryView==="recent")renderLibrary();}catch(error){toast(error.message)}}
+async function refreshWorkspaceMedia(){
+  const workspace=(await api("/api/media")).items||[],byFile=new Map([...media,...workspace].map(item=>[item.file,item]));
+  media=[...byFile.values()].sort((a,b)=>String(b.importedAt||"").localeCompare(String(a.importedAt||"")));
+  return workspace;
+}
+const wait=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
+function preparePreviewProxy(file,autoplay=false){
+  if(proxyRequests.has(file))return proxyRequests.get(file);
+  const task=(async()=>{
+    toast("Preparing a browser-compatible preview…");
+    await api("/api/proxy",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({file})});
+    for(let attempt=0;attempt<300;attempt++){
+      await wait(1000);
+      const workspace=await refreshWorkspaceMedia(),item=workspace.find(value=>value.file===file);
+      if(item?.proxy){
+        renderLibrary();
+        if(selectedClip()?.file===file){
+          loadSelectedPreview(true);
+          toast("Preview ready");
+          if(autoplay){
+            const resume=()=>{if(!isPlayingTimeline&&selectedClip()?.file===file)togglePlay()};
+            if(preview.readyState>=1)resume();else preview.addEventListener("loadedmetadata",resume,{once:true});
+          }
+        }
+        return item;
+      }
+      if(item&&!item.proxyPending&&attempt>1)throw new Error("FFmpeg could not create the preview proxy");
+    }
+    throw new Error("Preview proxy timed out");
+  })().catch(error=>toast(`Preview unavailable: ${error.message}`)).finally(()=>proxyRequests.delete(file));
+  proxyRequests.set(file,task);return task;
+}
 async function uploadFile(file){
   toast(`Importing ${file.name}…`);
   const item=await api("/api/upload",{method:"POST",headers:{"X-Filename":file.name,"Content-Type":"application/octet-stream"},body:file});
@@ -100,7 +133,7 @@ function addMediaToTimeline(item){
 function renderLibrary(){
   const list=libraryView==="recent"?recent:media;
   $("#mediaList").innerHTML=list.length?list.map(item=>`<div class="media-card ${selectedMediaFile===item.file?"selected":""}" data-media="${escapeHtml(item.file)}">
-    <div class="media-icon">${item.kind==="audio"?"♫":item.kind==="image"?"▧":item.kind==="lut"?"◈":"▶"}</div><div><div class="name">${escapeHtml(item.name)}</div><small>${item.kind}${item.duration?` · ${item.duration.toFixed(1)}s`:""}${item.proxy?" · proxy":""}</small></div><button class="add" data-add="${escapeHtml(item.file)}">＋</button></div>`).join(""):`<div class="empty">${libraryView==="recent"?"No recent files":"Import media to begin"}</div>`;
+    <div class="media-icon">${item.kind==="audio"?"♫":item.kind==="image"?"▧":item.kind==="lut"?"◈":"▶"}</div><div><div class="name">${escapeHtml(item.name)}</div><small>${item.kind}${item.duration?` · ${item.duration.toFixed(1)}s`:""}${item.proxy?" · proxy":item.proxyPending?" · preparing preview":""}</small></div><button class="add" data-add="${escapeHtml(item.file)}">＋</button></div>`).join(""):`<div class="empty">${libraryView==="recent"?"No recent files":"Import media to begin"}</div>`;
 }
 function renderTimeline(){
   const {map,total}=timelineLayout(), scale=Number($("#timelineZoom").value); document.documentElement.style.setProperty("--scale",`${scale}px`);
@@ -218,6 +251,7 @@ function renderAll(){
 function loadSelectedPreview(seek=true){
   const clip=selectedClip();if(!clip){preview.removeAttribute("src");stillPreview.removeAttribute("src");return}const item=mediaByFile(clip.file);const url=$("#proxyToggle").checked&&item.proxy?item.proxy:item.url;
   if(clip.kind==="freeze"){if(stillPreview.src!==new URL(item.url,location.href).href)stillPreview.src=item.url;applyPreviewEffects();return}
+  if($("#proxyToggle").checked&&!item.proxy&&(item.proxyPending||item.browserPlayable===false))preparePreviewProxy(clip.file,false);
   const absolute=new URL(url,location.href).href;if(preview.src!==absolute){preview.src=url;preview.load();preview.onloadedmetadata=()=>{if(seek)preview.currentTime=clip.start;applyPreviewEffects();};}else if(seek)preview.currentTime=clip.start;
   applyPreviewEffects();
 }
@@ -228,12 +262,18 @@ function seekTimeline(time){
   renderTimeline();updateTimecode();
 }
 function updateTimecode(){const total=timelineLayout().total;$("#timecode").textContent=`${formatTime(playheadTime)} / ${formatTime(total)}`;}
-function setupAudio(){if(audioContext)return;audioContext=new AudioContext();previewSource=audioContext.createMediaElementSource(preview);previewGain=audioContext.createGain();previewSource.connect(previewGain).connect(audioContext.destination);applyPreviewEffects();}
+function setupAudio(){if(audioContext)return;const Context=window.AudioContext||window.webkitAudioContext;if(!Context)return;audioContext=new Context();previewSource=audioContext.createMediaElementSource(preview);previewGain=audioContext.createGain();previewSource.connect(previewGain).connect(audioContext.destination);applyPreviewEffects();}
 async function togglePlay(){
-  const clip=selectedClip();if(!clip)return;setupAudio();await audioContext.resume();
+  const clip=selectedClip();if(!clip)return;setupAudio();if(audioContext)await audioContext.resume();
   if(isPlayingTimeline){preview.pause();isPlayingTimeline=false;$("#playButton").textContent="▶";return}
-  isPlayingTimeline=true;$("#playButton").textContent="❚❚";if(clip.kind!=="freeze")preview.playbackRate=clip.speed; if(clip.kind!=="freeze")await preview.play();
-  requestAnimationFrame(playTick);
+  try{
+    isPlayingTimeline=true;$("#playButton").textContent="❚❚";if(clip.kind!=="freeze")preview.playbackRate=clip.speed;if(clip.kind!=="freeze")await preview.play();
+    requestAnimationFrame(playTick);
+  }catch(error){
+    isPlayingTimeline=false;$("#playButton").textContent="▶";
+    const item=mediaByFile(clip.file),usingProxy=preview.currentSrc.includes("/proxies/");
+    if($("#proxyToggle").checked&&!usingProxy)preparePreviewProxy(clip.file,true);else toast(`Preview cannot play: ${error.message}`);
+  }
 }
 function playTick(){
   if(!isPlayingTimeline)return;const clip=selectedClip(),layout=clip&&timelineLayout().map.get(clip.id);if(!clip||!layout){isPlayingTimeline=false;return}
@@ -307,6 +347,7 @@ $("#exportContainer").addEventListener("change",syncExportOptions);
 $("#startExport").addEventListener("click",event=>{event.preventDefault();project.export={container:$("#exportContainer").value,codec:$("#exportCodec").value,width:$("#exportWidth").value,height:$("#exportHeight").value,quality:Number($("#exportQuality").value),hardware:$("#hardwareExport").checked,pcmAudio:$("#pcmAudio").checked};snapshot(false);startRender(false)});
 preview.addEventListener("timeupdate",()=>{applyPreviewEffects();if(!isPlayingTimeline){const clip=selectedClip(),layout=clip&&timelineLayout().map.get(clip.id);if(layout){playheadTime=layout.start+(preview.currentTime-clip.start)/clip.speed;updateTimecode();$("#playhead").style.left=`${58+playheadTime*Number($("#timelineZoom").value)}px`}}});
 preview.addEventListener("ended",()=>{if(isPlayingTimeline)playTick()});
+preview.addEventListener("error",()=>{const clip=selectedClip();if(!clip||!preview.currentSrc)return;if(preview.currentSrc.includes("/proxies/"))toast("The preview proxy could not be decoded");else if($("#proxyToggle").checked)preparePreviewProxy(clip.file,false);});
 const timelineScroll=$(".timeline-scroll");let timelineScrubbing=false;
 function scrubTimelinePointer(event){const lane=timelineScroll.getBoundingClientRect(),scroll=timelineScroll.scrollLeft;seekTimeline((event.clientX-lane.left+scroll-58)/Number($("#timelineZoom").value));}
 timelineScroll.addEventListener("pointerdown",event=>{if(event.target.closest(".clip"))return;timelineScrubbing=true;if(isPlayingTimeline){preview.pause();isPlayingTimeline=false;$("#playButton").textContent="▶";}timelineScroll.setPointerCapture(event.pointerId);scrubTimelinePointer(event);event.preventDefault()});
@@ -326,7 +367,7 @@ document.addEventListener("keydown",event=>{if(["INPUT","SELECT","TEXTAREA"].inc
 async function initialize(){
   const autosave=localStorage.getItem("vdodesk.autosave");if(autosave){try{const saved=JSON.parse(autosave);project={...freshProject(),...(saved.project||{})};media=saved.media||[];}catch{}}
   try{const status=await api("/api/status");$("#version").textContent=`${status.version} · local`;const caps=status.capabilities||{};$("#capabilities").textContent=`Available: ${caps.h264VideoToolbox?"Apple VideoToolbox H.264/HEVC":"software H.264/H.265"}${caps.vp9?", VP9":""}${status.opencv?` · OpenCV ${status.opencv}`:" · manual tracking fallback"}`;}catch(error){toast(error.message)}
-  try{const workspace=(await api("/api/media")).items||[],byFile=new Map([...media,...workspace].map(item=>[item.file,item]));media=[...byFile.values()].sort((a,b)=>String(b.importedAt||"").localeCompare(String(a.importedAt||"")));}catch(error){toast(error.message)}
+  try{await refreshWorkspaceMedia();}catch(error){toast(error.message)}
   await refreshRecent();renderAll();
 }
 initialize();
