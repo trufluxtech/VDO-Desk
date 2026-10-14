@@ -1,4 +1,4 @@
-# VDODesk 1.2.0 beta 1 scope and implementation map
+# VDODesk 1.2.1 beta 1 scope and implementation map
 
 The original roadmap is implemented in the retained local Python/browser/FFmpeg architecture.
 
@@ -28,6 +28,8 @@ Version 1.1.3 beta 1 makes timeline clip movement a direct drag-and-drop interac
 Version 1.1.4 beta 1 guarantees text export even when FFmpeg provides neither `drawtext` nor libass. VDODesk renders opening titles, watermarks and tracked labels to transparent images and composites them with the standard video overlay filter. A dependency-free embedded bitmap font remains available when Pillow is not installed.
 
 Version 1.2.0 beta 1 replaces the old project-music shortcut with true A1 editing. Source audio can be unlinked from video, selected and deleted independently, replaced with a highlighted music file, dragged or trimmed on A1, and restored to the original linked state. Independent audio is persisted, relinked, mixed into preview renders and final exports, and included in undo/redo.
+
+Version 1.2.1 beta 1 adds synchronized browser playback for independent A1 audio. Timeline Play now starts, seeks, pauses and loops A1 items at their actual timeline positions, with live mute and level control; FFmpeg remains authoritative for rendered previews and exports.
 
 ## Architecture boundary
 

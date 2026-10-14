@@ -40,7 +40,7 @@ const defaultAudioClip = (media,start=0,duration=0) => ({
   speed:1,reverse:false,volume:1,mute:false,linkedClipId:""
 });
 const freshProject = () => ({
-  version: "1.2.0-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
+  version: "1.2.1-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
   watermarkOpacity: .55, imageWatermark: {file:"",opacity:.7,scale:.2,x:.8,y:.08}, safeArea: false,
   clips: [], audioClips: [], audio: "", musicVolume: .5, voiceovers: [], audioDucking: true,
   export: {container:"mp4",codec:"h264",width:"",height:"",quality:20,hardware:true,pcmAudio:false}
@@ -52,6 +52,7 @@ let history = [], future = [], playheadTime = 0, isPlayingTimeline = false, save
 let audioContext, previewSource, previewGain, recorder, recordChunks = [], recordStart = 0;
 let suppressTimelineClick = false;
 const proxyRequests = new Map();
+const timelineAudioPlayers = new Map();
 const preview = $("#preview"), stillPreview = $("#stillPreview"), stage = $("#stage");
 
 function snapshot(pushHistory=true){
@@ -269,7 +270,7 @@ function applyPreviewEffects(){
   const mask=$("#maskPreview"),maskToggle=$("#showMask");mask.style.display=maskToggle?.checked&&clip?.tracking?.maskUrl?"block":"none";if(clip?.tracking?.maskUrl)mask.src=clip.tracking.maskUrl;
 }
 function renderAll(){
-  $("#projectName").value=project.name;renderLibrary();renderTimeline();renderInspector();loadSelectedPreview(false);updateTimecode();
+  $("#projectName").value=project.name;renderLibrary();renderTimeline();renderInspector();loadSelectedPreview(false);updateTimecode();syncTimelineAudioPreview(playheadTime,isPlayingTimeline);
 }
 function loadSelectedPreview(seek=true){
   const clip=selectedClip();if(!clip){preview.removeAttribute("src");stillPreview.removeAttribute("src");return}const item=mediaByFile(clip.file);const url=$("#proxyToggle").checked&&item.proxy?item.proxy:item.url;
@@ -282,27 +283,63 @@ function seekTimeline(time){
   const {map,total}=timelineLayout();playheadTime=clamp(time,0,total);let target=project.clips.find(clip=>{const item=map.get(clip.id);return item&&playheadTime>=item.start&&playheadTime<item.start+item.duration});
   if(!target)target=primaryClips().at(-1)||project.clips.at(-1);if(target&&target.id!==selectedClipId){selectedClipId=target.id;renderInspector();loadSelectedPreview(false)}
   if(target&&target.kind!=="freeze"){const item=map.get(target.id);preview.currentTime=Number(target.start)+(playheadTime-item.start)*Number(target.speed||1)}
-  renderTimeline();updateTimecode();
+  renderTimeline();updateTimecode();syncTimelineAudioPreview(playheadTime,isPlayingTimeline);
 }
 function updateTimecode(){const total=timelineLayout().total;$("#timecode").textContent=`${formatTime(playheadTime)} / ${formatTime(total)}`;}
 function setupAudio(){if(audioContext)return;const Context=window.AudioContext||window.webkitAudioContext;if(!Context)return;audioContext=new Context();previewSource=audioContext.createMediaElementSource(preview);previewGain=audioContext.createGain();previewSource.connect(previewGain).connect(audioContext.destination);applyPreviewEffects();}
+function disposeTimelineAudioPlayer(id){
+  const player=timelineAudioPlayers.get(id);if(!player)return;player.element.pause();player.element.removeAttribute("src");player.element.load();player.source?.disconnect();player.gain?.disconnect();timelineAudioPlayers.delete(id);
+}
+function timelineAudioPlayer(audio){
+  const item=mediaByFile(audio.file),url=item.proxy||item.url;let player=timelineAudioPlayers.get(audio.id);
+  if(player?.url===url)return player;if(player)disposeTimelineAudioPlayer(audio.id);
+  const element=new Audio();element.preload="auto";element.loop=true;element.playsInline=true;element.src=url;
+  player={element,url,source:null,gain:null,pendingTime:0,reportedError:false};
+  if(audioContext){try{player.source=audioContext.createMediaElementSource(element);player.gain=audioContext.createGain();player.source.connect(player.gain).connect(audioContext.destination)}catch{} }
+  element.addEventListener("loadedmetadata",()=>seekTimelineAudioPlayer(player));
+  element.addEventListener("error",()=>{if(!player.reportedError){player.reportedError=true;toast(`A1 preview could not decode ${audio.name}. Render preview/export will still use FFmpeg.`)}});
+  timelineAudioPlayers.set(audio.id,player);return player;
+}
+function seekTimelineAudioPlayer(player){
+  if(player.element.readyState<1)return;let target=Math.max(0,Number(player.pendingTime)||0),duration=Number(player.element.duration);
+  if(Number.isFinite(duration)&&duration>0)target%=duration;
+  const current=Number(player.element.currentTime)||0;let drift=Math.abs(current-target);if(Number.isFinite(duration)&&duration>0)drift=Math.min(drift,Math.abs(duration-drift));
+  if(drift>.25)try{player.element.currentTime=target}catch{}
+}
+function syncTimelineAudioPreview(time,playing){
+  if(!audioContext)return;const active=new Set(),now=Math.max(0,Number(time)||0);
+  for(const audio of project.audioClips){
+    const start=Math.max(0,Number(audio.start)||0),duration=Math.max(.05,Number(audio.duration)||.05);
+    if(audio.mute||now<start||now>=start+duration)continue;active.add(audio.id);
+    const player=timelineAudioPlayer(audio),speed=clamp(audio.speed||1,.25,4),elapsed=now-start;
+    player.pendingTime=Math.max(0,Number(audio.sourceStart)||0)+(audio.reverse?Math.max(0,duration-elapsed):elapsed)*speed;
+    player.element.playbackRate=speed;player.element.volume=player.gain?1:clamp(audio.volume??1,0,1);if(player.gain)player.gain.gain.value=clamp(audio.volume??1,0,4);
+    seekTimelineAudioPlayer(player);
+    if(playing&&player.element.paused)player.element.play().catch(error=>{if(!player.reportedError){player.reportedError=true;toast(`A1 audio could not start: ${error.message}`)}});else if(!playing&&!player.element.paused)player.element.pause();
+  }
+  for(const [id,player] of timelineAudioPlayers){
+    if(!project.audioClips.some(audio=>audio.id===id)){disposeTimelineAudioPlayer(id);continue}
+    if(!active.has(id)&&!player.element.paused)player.element.pause();
+  }
+}
+function stopTimelineAudioPreview(){for(const player of timelineAudioPlayers.values())player.element.pause();}
 async function togglePlay(){
   const clip=selectedClip();if(!clip)return;setupAudio();if(audioContext)await audioContext.resume();
-  if(isPlayingTimeline){preview.pause();isPlayingTimeline=false;$("#playButton").textContent="▶";return}
+  if(isPlayingTimeline){preview.pause();isPlayingTimeline=false;syncTimelineAudioPreview(playheadTime,false);$("#playButton").textContent="▶";return}
   try{
-    isPlayingTimeline=true;$("#playButton").textContent="❚❚";if(clip.kind!=="freeze")preview.playbackRate=clip.speed;if(clip.kind!=="freeze")await preview.play();
+    isPlayingTimeline=true;$("#playButton").textContent="❚❚";if(clip.kind!=="freeze")preview.playbackRate=clip.speed;syncTimelineAudioPreview(playheadTime,true);if(clip.kind!=="freeze")await preview.play();
     requestAnimationFrame(playTick);
   }catch(error){
-    isPlayingTimeline=false;$("#playButton").textContent="▶";
+    isPlayingTimeline=false;stopTimelineAudioPreview();$("#playButton").textContent="▶";
     const item=mediaByFile(clip.file),usingProxy=preview.currentSrc.includes("/proxies/");
     if($("#proxyToggle").checked&&!usingProxy)preparePreviewProxy(clip.file,true);else toast(`Preview cannot play: ${error.message}`);
   }
 }
 function playTick(){
-  if(!isPlayingTimeline)return;const clip=selectedClip(),layout=clip&&timelineLayout().map.get(clip.id);if(!clip||!layout){isPlayingTimeline=false;return}
+  if(!isPlayingTimeline)return;const clip=selectedClip(),layout=clip&&timelineLayout().map.get(clip.id);if(!clip||!layout){isPlayingTimeline=false;stopTimelineAudioPreview();return}
   if(clip.kind!=="freeze")playheadTime=layout.start+(preview.currentTime-clip.start)/clip.speed;else playheadTime+=1/60;
   if(playheadTime>=layout.start+layout.duration-.02){const map=timelineLayout().map,all=primaryClips().map(item=>[item.id,map.get(item.id)]).filter(([,item])=>item).sort((a,b)=>a[1].start-b[1].start),next=all.find(([,item])=>item.start>layout.start+.001);if(next){selectedClipId=next[0];selectedVoiceoverId="";playheadTime=next[1].start;renderInspector();loadSelectedPreview(true);const nc=selectedClip();if(nc?.kind!=="freeze"){preview.playbackRate=nc.speed;preview.play().catch(()=>{})}}else{isPlayingTimeline=false;$("#playButton").textContent="▶";}}
-  renderTimeline();updateTimecode();if(isPlayingTimeline)requestAnimationFrame(playTick);
+  syncTimelineAudioPreview(playheadTime,isPlayingTimeline);renderTimeline();updateTimecode();if(isPlayingTimeline)requestAnimationFrame(playTick);
 }
 
 function movePrimaryClip(clip,offset){
@@ -373,7 +410,7 @@ function saveProject(){project.name=$("#projectName").value||"Untitled project";
 function syncExportOptions(){const webm=$("#exportContainer").value==="webm",codec=$("#exportCodec");if(webm)codec.value="vp9";else if(codec.value==="vp9")codec.value="h264";[...codec.options].forEach(option=>option.disabled=webm?option.value!=="vp9":option.value==="vp9");$("#pcmAudio").disabled=$("#exportContainer").value!=="mov";if($("#pcmAudio").disabled)$("#pcmAudio").checked=false;}
 function openExportDialog(){const settings=project.export||{};$("#exportContainer").value=settings.container||"mp4";$("#exportCodec").value=settings.codec||"h264";$("#exportWidth").value=settings.width||"";$("#exportHeight").value=settings.height||"";$("#exportQuality").value=settings.quality??20;$("#hardwareExport").checked=settings.hardware!==false;$("#pcmAudio").checked=Boolean(settings.pcmAudio);syncExportOptions();$("#exportDialog").showModal();}
 async function startRender(previewMode=false){
-  if(!project.clips.length)return toast("Add at least one clip");$("#exportDialog").close();toast(previewMode?"Rendering preview…":"Export started…");
+  if(!project.clips.length)return toast("Add at least one clip");if(isPlayingTimeline){preview.pause();isPlayingTimeline=false;$("#playButton").textContent="▶"}stopTimelineAudioPreview();$("#exportDialog").close();toast(previewMode?"Rendering preview…":"Export started…");
   try{const {job}=await api(previewMode?"/api/preview":"/api/render",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(project)});pollJob(job,previewMode)}catch(error){toast(error.message)}
 }
 async function pollJob(job,previewMode){try{const state=await api(`/api/job/${job}`);toast(`${state.message}${state.progress?` · ${state.progress}%`:""}`);if(state.state==="done"){if(previewMode){preview.src=state.url;preview.play().catch(error=>toast(`Preview could not start: ${error.message}`));}else{const link=document.createElement("a");link.href=state.url;link.download="";link.click();}const warnings=state.details?.warnings||[];if(warnings.length)toast(`Export ready · ${warnings.join(" ")}`);return}if(state.state==="error")return;setTimeout(()=>pollJob(job,previewMode),900)}catch(error){toast(error.message)}}

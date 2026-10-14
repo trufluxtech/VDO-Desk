@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1-beta.1
+
+- Fixed independent A1 clips being silent during normal timeline playback.
+- Added browser audio players synchronized to the playhead, including seek, pause, timeline start, clip duration, looping and per-item level/mute.
+- Reuses browser-compatible proxies for detached source audio when available while retaining FFmpeg as the final render path.
+
 ## 1.2.0-beta.1
 
 - Replaced the one-click global music shortcut with editable audio clips on A1.
