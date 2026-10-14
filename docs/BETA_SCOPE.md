@@ -1,4 +1,4 @@
-# VDODesk 1.2.1 beta 1 scope and implementation map
+# VDODesk 1.3.0 beta 1 scope and implementation map
 
 The original roadmap is implemented in the retained local Python/browser/FFmpeg architecture.
 
@@ -31,6 +31,8 @@ Version 1.2.0 beta 1 replaces the old project-music shortcut with true A1 editin
 
 Version 1.2.1 beta 1 adds synchronized browser playback for independent A1 audio. Timeline Play now starts, seeks, pauses and loops A1 items at their actual timeline positions, with live mute and level control; FFmpeg remains authoritative for rendered previews and exports.
 
+Version 1.3.0 beta 1 packages the same editor for Windows 10 and 11. Its launcher detects supported Python installations and project virtual environments, validates both FFmpeg executables, handles paths containing spaces and retains terminal errors. Separate helpers install the core prerequisites with Windows Package Manager and optional OpenCV into an isolated environment.
+
 ## Architecture boundary
 
-The requested architecture retention intentionally excludes a native Qt/C++ rewrite and signed `.app`/Windows binary. The supplied launchers run the local Python service and browser editor. FFmpeg remains authoritative for previews and exports, with feature detection selecting Apple VideoToolbox where available.
+The requested architecture retention intentionally excludes a native Qt/C++ rewrite and signed `.app`/Windows installer. The supplied Windows and macOS launchers run the local Python service and browser editor. FFmpeg remains authoritative for previews and exports, with feature detection selecting Apple VideoToolbox where available.

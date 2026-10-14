@@ -1,8 +1,17 @@
-# VDODesk 1.2.1 beta 1
+# VDODesk 1.3.0 beta 1
 
 <img src="assets/vdodesk-logo.png" alt="VDODesk logo" width="96">
 
 VDODesk is a local-first video editor built with the existing project architecture: a browser UI, a Python standard-library server, and FFmpeg/FFprobe for authoritative media processing. It listens only on `127.0.0.1`, has no account or analytics, and never modifies imported source files.
+
+## Start on Windows 10 or 11
+
+1. Extract the ZIP to a writable folder; do not run it inside the ZIP preview.
+2. Double-click `SETUP_WINDOWS.bat` once to install or confirm Python 3.12 and FFmpeg using Windows Package Manager.
+3. Close the setup window so Windows refreshes `PATH`.
+4. Double-click `START_WINDOWS.bat`. VDODesk opens at <http://127.0.0.1:8765>.
+
+The launcher detects a project `.venv`, the Windows `py` launcher, or `python.exe`; validates Python 3.10+, FFmpeg and FFprobe; supports paths containing spaces; passes options such as `--port`; and keeps error messages visible. See [`docs/WINDOWS.md`](docs/WINDOWS.md) for manual setup and troubleshooting. Optional OpenCV support is installed with `INSTALL_ADVANCED_WINDOWS.bat`.
 
 ## Start on macOS (including M4)
 
@@ -12,8 +21,6 @@ VDODesk is a local-first video editor built with the existing project architectu
 4. VDODesk opens at <http://127.0.0.1:8765>.
 
 For automatic subject detection, multi-sample tracking, and segmentation masks, run `./INSTALL_ADVANCED_MAC.command` once. This creates a private `.venv` and installs OpenCV. Manual boxes, smart reframe, outlines, and anchored text remain usable without OpenCV.
-
-Windows: install Python and FFmpeg on `PATH`, then run `START_WINDOWS.bat`. Optional OpenCV can be installed with `python -m pip install -r requirements-advanced.txt`.
 
 ## Implemented editor features
 
@@ -54,6 +61,6 @@ The live browser preview is designed for responsive editing and visibly approxim
 
 ## Validation and limitations
 
-Run `python3 -m unittest discover -s tests -v` to exercise workspace persistence, waveforms, proxies, freeze frames, tracking fallbacks, clip filters, color/effect rendering, audio gain/mute, detached A1 replacement, transitions, overlays, titles, watermarks, voiceover ducking and export compatibility. VDODesk is a feature-complete beta, not a signed/notarized macOS application. Very large/high-resolution projects remain bounded by local RAM, storage and FFmpeg performance. Stabilization is FFmpeg `deshake`; tracking uses efficient sampled template tracking rather than a cloud AI service. Test short exports before committing important footage.
+Run `python3 -m unittest discover -s tests -v` (or `py -3 -m unittest discover -s tests -v` on Windows) to exercise workspace persistence, waveforms, proxies, freeze frames, tracking fallbacks, clip filters, color/effect rendering, audio gain/mute, detached A1 replacement, transitions, overlays, titles, watermarks, voiceover ducking and export compatibility. VDODesk is a feature-complete beta, not a signed Windows installer or notarized macOS application. Very large/high-resolution projects remain bounded by local RAM, storage and FFmpeg performance. Stabilization is FFmpeg `deshake`; tracking uses efficient sampled template tracking rather than a cloud AI service. Test short exports before committing important footage.
 
 Distribution requires an independent review of FFmpeg codec/patent licensing, third-party component licenses, security hardening and Apple notarization requirements.

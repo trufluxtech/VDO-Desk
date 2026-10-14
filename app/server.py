@@ -21,7 +21,7 @@ from media_services import (
 from render_engine import number, render_project, safe_name
 
 
-VERSION = "1.2.1-beta.1"
+VERSION = "1.3.0-beta.1"
 ROOT = Path(__file__).resolve().parents[1]
 PROJECTS = ROOT / "projects"
 MEDIA = PROJECTS / "media"
@@ -401,7 +401,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8765)
     arguments = parser.parse_args()
     if not ffmpeg_available():
-        raise SystemExit("Install FFmpeg and FFprobe first (brew install ffmpeg)")
+        raise SystemExit("Install FFmpeg and FFprobe and add them to PATH. Windows users can run SETUP_WINDOWS.bat.")
     url = f"http://127.0.0.1:{arguments.port}"
     print(f"VDODesk {VERSION} ready at {url}", flush=True)
     threading.Timer(1, lambda: webbrowser.open(url)).start()

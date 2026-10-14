@@ -40,7 +40,7 @@ const defaultAudioClip = (media,start=0,duration=0) => ({
   speed:1,reverse:false,volume:1,mute:false,linkedClipId:""
 });
 const freshProject = () => ({
-  version: "1.2.1-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
+  version: "1.3.0-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
   watermarkOpacity: .55, imageWatermark: {file:"",opacity:.7,scale:.2,x:.8,y:.08}, safeArea: false,
   clips: [], audioClips: [], audio: "", musicVolume: .5, voiceovers: [], audioDucking: true,
   export: {container:"mp4",codec:"h264",width:"",height:"",quality:20,hardware:true,pcmAudio:false}

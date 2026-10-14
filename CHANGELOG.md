@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0-beta.1
+
+- Added a Windows 10/11 release package and documented native Windows startup flow.
+- Rebuilt `START_WINDOWS.bat` with Python 3.10+, FFmpeg/FFprobe, `.venv`, path-with-spaces, port argument, and visible error handling.
+- Added `SETUP_WINDOWS.bat` for optional one-click prerequisite installation through Windows Package Manager.
+- Added `INSTALL_ADVANCED_WINDOWS.bat` for isolated OpenCV tracking and segmentation support.
+- Added a dedicated Windows installation and troubleshooting guide.
+- Replaced the macOS-only FFmpeg startup error with cross-platform guidance.
+
 ## 1.2.1-beta.1
 
 - Fixed independent A1 clips being silent during normal timeline playback.
