@@ -317,15 +317,116 @@ def clip_filter_chain(clip):
     return []
 
 
+def photo_motion_expressions(config, frames):
+    """Return independent background/foreground camera expressions."""
+    preset = str(config.get("preset") or "push-in")
+    depth = number(config.get("depthStrength"), .1, 2, .75)
+    travel = number(config.get("travel"), .01, .25, .08)
+    focus_x = number(config.get("focusX"), .05, .95, .5)
+    focus_y = number(config.get("focusY"), .05, .95, .45)
+    base_zoom = number(config.get("edgeFill"), 1.02, 1.3, 1.08)
+    progress = f"(on/{max(1, frames - 1)})"
+    easing = str(config.get("easing") or "ease-in-out")
+    if easing == "ease-in":
+        eased = f"({progress}*{progress})"
+    elif easing == "ease-out":
+        eased = f"(1-(1-{progress})*(1-{progress}))"
+    elif easing == "linear":
+        eased = progress
+    else:
+        eased = f"({progress}*{progress}*(3-2*{progress}))"
+
+    def linear(start, end):
+        return f"({start:.8f}+({end-start:.8f})*{eased})"
+
+    def position(zoom, x, y):
+        return {
+            "z": zoom,
+            "x": f"(iw-iw/zoom)*{x}",
+            "y": f"(ih-ih/zoom)*{y}",
+        }
+
+    foreground_zoom = min(.42, travel * (1 + depth))
+    background_zoom = min(.15, travel * .35)
+    if preset == "pull-out":
+        bg_zoom = linear(base_zoom + background_zoom, base_zoom)
+        fg_zoom = linear(base_zoom + foreground_zoom, base_zoom)
+        bg_x = fg_x = f"{focus_x:.8f}"
+        bg_y = fg_y = f"{focus_y:.8f}"
+    elif preset in {"orbit-left", "orbit-right"}:
+        direction = 1 if preset == "orbit-left" else -1
+        bg_end_x = max(.02, min(.98, focus_x + direction * travel * .35))
+        fg_end_x = max(.02, min(.98, focus_x - direction * min(.32, travel * depth)))
+        fg_end_y = max(.02, min(.98, focus_y - travel * depth * .12))
+        bg_zoom = linear(base_zoom, base_zoom + background_zoom)
+        fg_zoom = linear(base_zoom, base_zoom + foreground_zoom * .5)
+        bg_x, fg_x = linear(focus_x, bg_end_x), linear(focus_x, fg_end_x)
+        bg_y, fg_y = f"{focus_y:.8f}", linear(focus_y, fg_end_y)
+    elif preset == "floating-portrait":
+        amplitude_x = min(.18, focus_x - .02, .98 - focus_x, travel * depth * .7)
+        amplitude_y = min(.12, focus_y - .02, .98 - focus_y, travel * depth * .45)
+        wave = f"sin(2*PI*{progress})"
+        lift = f"sin(PI*{progress})"
+        bg_zoom = f"({base_zoom:.8f}+{background_zoom:.8f}*{lift})"
+        fg_zoom = f"({base_zoom:.8f}+{foreground_zoom*.4:.8f}*{lift})"
+        bg_x = f"({focus_x:.8f}-{amplitude_x*.2:.8f}*{wave})"
+        fg_x = f"({focus_x:.8f}+{amplitude_x:.8f}*{wave})"
+        bg_y = f"{focus_y:.8f}"
+        fg_y = f"({focus_y:.8f}-{amplitude_y:.8f}*{lift})"
+    else:  # cinematic push-in
+        bg_zoom = linear(base_zoom, base_zoom + background_zoom)
+        fg_zoom = linear(base_zoom, base_zoom + foreground_zoom)
+        bg_x = fg_x = f"{focus_x:.8f}"
+        bg_y = fg_y = f"{focus_y:.8f}"
+    return position(bg_zoom, bg_x, bg_y), position(fg_zoom, fg_x, fg_y)
+
+
+def render_photo_motion(source, depth_map, target, duration, width, height, fps, config):
+    """Render one photograph as a depth-separated 2.5D parallax video."""
+    frames = max(1, round(duration * fps))
+    background, foreground = photo_motion_expressions(config, frames)
+    def zoompan(values):
+        return (f"zoompan=z='{values['z']}':x='{values['x']}':y='{values['y']}':"
+                f"d=1:s={width}x{height}:fps={fps}")
+    graph = [
+        f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},format=rgba,split=2[photobg][photofg]",
+        f"[1:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},format=gray[depthbase]",
+        f"[photobg]{zoompan(background)},format=rgba[bgmotion]",
+        f"[photofg]{zoompan(foreground)},format=rgba[fgmotion]",
+        f"[depthbase]{zoompan(foreground)},format=gray[fgmask]",
+        "[fgmotion][fgmask]alphamerge[foreground]",
+        "[bgmotion][foreground]overlay=eof_action=pass,format=yuv420p[outv]",
+    ]
+    run([
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-loop", "1", "-framerate", str(fps), "-t", str(duration), "-i", str(source),
+        "-loop", "1", "-framerate", str(fps), "-t", str(duration), "-i", str(depth_map),
+        "-filter_complex", ";".join(graph), "-map", "[outv]", "-an", "-t", str(duration),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", str(target),
+    ])
+    return target
+
+
 def render_piece(clip, index, source, target, width, height, fps, temp, overlay=False,
                  text_filters=None, warnings=None):
     text_filters = text_filters or {}
     warnings = warnings if warnings is not None else []
+    media_root = source.parent
     still = clip.get("kind") == "freeze" or source.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
     duration = clip_duration(clip, source)
     speed = number(clip.get("speed"), .25, 4, 1)
     start = number(clip.get("start"), 0, 86400, 0)
     source_span = duration * speed
+    photo_motion = clip.get("photoMotion") or {}
+    if still and photo_motion.get("enabled"):
+        depth_name = safe_name(photo_motion.get("depthMap"))
+        depth_path = media_root / depth_name
+        if depth_name and depth_path.is_file():
+            motion_source = temp / f"photo-motion-{index:03}.mp4"
+            render_photo_motion(source, depth_path, motion_source, duration, width, height, fps, photo_motion)
+            source = motion_source;still = False;speed = 1;start = 0;source_span = duration
+        else:
+            warnings.append(f"Photo Motion depth map missing for {safe_name(clip.get('file'))}; used standard still motion.")
     if still:
         input_args = ["-loop", "1", "-t", str(duration), "-i", str(source)]
         info = {"hasAudio": False}
@@ -398,7 +499,7 @@ def render_piece(clip, index, source, target, width, height, fps, temp, overlay=
     vf += clip_filter_chain(clip)
     lut_name = safe_name(clip.get("lut"))
     if lut_name:
-        lut_path = source.parent / lut_name
+        lut_path = media_root / lut_name
         if lut_path.is_file():
             vf.append(f"lut3d=file='{escaped_filter_path(lut_path)}'")
     vf += [

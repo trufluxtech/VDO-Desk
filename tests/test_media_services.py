@@ -13,6 +13,21 @@ import media_services
 
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg is required")
 class MediaServicesTests(unittest.TestCase):
+    def test_local_photo_depth_map_is_generated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, depth = root / "photo.png", root / "depth.png"
+            subprocess.run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                "testsrc2=size=240x160", "-frames:v", "1", str(source),
+            ], check=True)
+            details = media_services.create_photo_depth_map(source, depth, .55, .42, .34)
+            self.assertTrue(depth.is_file())
+            self.assertGreater(depth.stat().st_size, 100)
+            self.assertIn("engine", details)
+            info = media_services.probe_media(depth)
+            self.assertEqual((240, 160), (info["width"], info["height"]))
+
     def test_waveform_freeze_proxy_and_manual_analysis(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

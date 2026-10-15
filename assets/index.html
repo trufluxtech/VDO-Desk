@@ -34,6 +34,7 @@
           <div id="stage" class="stage ratio-16-9">
             <video id="preview" playsinline></video>
             <img id="stillPreview" alt="">
+            <div id="photoMotionLayer" class="photo-motion-layer"><img id="photoMotionBackground" alt=""><img id="photoMotionForeground" alt=""></div>
             <div id="safeArea" class="safe-area"></div>
             <div id="subjectBox" class="subject-box"></div>
             <img id="maskPreview" class="mask-preview" alt="">
@@ -71,9 +72,16 @@
 
     <aside class="inspector panel">
       <div class="panel-title"><strong>Inspector</strong><span id="selectionLabel">No selection</span></div>
-      <div class="tabs" id="inspectorTabs">
-        <button class="active" data-tab="clip">Clip</button><button data-tab="transform">Transform</button><button data-tab="color">Color</button>
-        <button data-tab="filters">Filters</button><button data-tab="motion">Motion</button><button data-tab="audio">Audio</button><button data-tab="stickers">Stickers</button><button data-tab="ai">Track</button><button data-tab="project">Project</button>
+      <div class="inspector-menu">
+        <label for="inspectorMenu">Tool</label>
+        <select id="inspectorMenu" aria-label="Inspector tool">
+          <optgroup label="Clip">
+            <option value="clip">Clip &amp; Timing</option><option value="transform">Transform</option><option value="color">Color</option>
+            <option value="filters">Filters</option><option value="motion">Motion Keyframes</option><option value="photo3d">3D Photo Motion</option><option value="audio">Audio</option>
+          </optgroup>
+          <optgroup label="Layers &amp; Analysis"><option value="stickers">Stickers &amp; Emoji</option><option value="ai">Subject Tracking</option></optgroup>
+          <optgroup label="Project"><option value="project">Project Settings</option><option value="export">Export Settings</option></optgroup>
+        </select>
       </div>
       <div id="inspectorBody"></div>
     </aside>

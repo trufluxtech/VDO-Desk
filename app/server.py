@@ -15,13 +15,13 @@ import uuid
 import webbrowser
 
 from media_services import (
-    analyze_subject, audio_waveform, create_proxy, encoder_capabilities,
+    analyze_subject, audio_waveform, create_photo_depth_map, create_proxy, encoder_capabilities,
     extract_freeze, ffmpeg_available, filter_capabilities, probe_media,
 )
 from render_engine import number, render_project, safe_name
 
 
-VERSION = "1.4.0-beta.1"
+VERSION = "1.5.0-beta.1"
 ROOT = Path(__file__).resolve().parents[1]
 PROJECTS = ROOT / "projects"
 MEDIA = PROJECTS / "media"
@@ -361,6 +361,29 @@ class Handler(BaseHTTPRequestHandler):
                 target = MEDIA / f"{uuid.uuid4().hex[:10]}-freeze.jpg"
                 extract_freeze(source, target, number(body.get("at"), 0, 86400, 0))
                 item = remember_file(target, "Freeze frame")
+                return self.json_response(200, item)
+            except Exception as error:
+                return self.json_response(400, {"error": str(error)})
+        if path == "/api/photo-depth":
+            try:
+                body = self.read_json()
+                source = MEDIA / safe_name(body.get("file"))
+                if not source.is_file():
+                    raise ValueError("Missing source image")
+                source_item = media_item(source)
+                if source_item.get("kind") != "image":
+                    raise ValueError("3D Photo Motion requires an image or freeze frame")
+                target = MEDIA / f"{uuid.uuid4().hex[:10]}-depth.png"
+                details = create_photo_depth_map(
+                    source, target,
+                    number(body.get("focusX"), 0, 1, .5),
+                    number(body.get("focusY"), 0, 1, .45),
+                    number(body.get("radius"), .12, .75, .36),
+                )
+                item = remember_file(target, f"Depth map · {source_item['name']}")
+                item["depthEngine"] = details["engine"]
+                if details.get("warning"):
+                    item["depthWarning"] = details["warning"]
                 return self.json_response(200, item)
             except Exception as error:
                 return self.json_response(400, {"error": str(error)})

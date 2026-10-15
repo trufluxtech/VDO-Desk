@@ -1,4 +1,4 @@
-# VDODesk 1.4.0 beta 1 scope and implementation map
+# VDODesk 1.5.0 beta 1 scope and implementation map
 
 The original roadmap is implemented in the retained local Python/browser/FFmpeg architecture.
 
@@ -10,6 +10,8 @@ The original roadmap is implemented in the retained local Python/browser/FFmpeg 
 | Color controls | White balance, tint, hue, gamma, shadows/highlights, saturation/contrast/brightness and `.cube` LUTs |
 | Selected-clip filters | Ten presets with adjustable intensity and matching live-preview/FFmpeg export behavior |
 | Stickers and emoji | Dedicated S1 track with built-in emoji, imported image stickers, drag/trim timing, direct viewer placement, transforms, persistence, relinking and FFmpeg export |
+| 3D photo movement | Local depth generation, five camera presets, live 2.5D preview, focal/radius correction, imported custom depth maps and depth-separated FFmpeg export |
+| Compact editing navigation | Categorized Inspector Tool drop-down covering all clip, transform, color, filter, motion, audio, layer, analysis, project and export panels |
 | Safe area and smart reframe | Safe-area overlay plus tracked focal points driving animated `zoompan` framing |
 | Tracking, masks and outlines | OpenCV detection/GrabCut, manual correction, sampled template path, outline and anchored text; dependency-free fallback |
 | Freeze frame and voiceover | FFmpeg still extraction, MediaRecorder capture, timed VO lane and sidechain ducking |
@@ -35,6 +37,8 @@ Version 1.2.1 beta 1 adds synchronized browser playback for independent A1 audio
 Version 1.3.0 beta 1 packages the same editor for Windows 10 and 11. Its launcher detects supported Python installations and project virtual environments, validates both FFmpeg executables, handles paths containing spaces and retains terminal errors. Separate helpers install the core prerequisites with Windows Package Manager and optional OpenCV into an isolated environment.
 
 Version 1.4.0 beta 1 adds the S1 sticker layer. Native emoji are converted in the browser to transparent PNG media, while imported PNG, JPEG and WebP images can also be used. Every sticker has independent timing, position, scale, rotation and opacity in live preview and FFmpeg export, with timeline drag/trim, direct viewer dragging, save/recovery, undo/redo and relinking support.
+
+Version 1.5.0 beta 1 adds 3D Photo Motion without changing the local architecture. It creates a soft subject depth map locally, moves foreground and background through independent camera paths, and uses the same depth-separated compositor for rendered previews and final exports. OpenCV improves automatic subject separation when present; the built-in focal-depth fallback and custom grayscale depth-map option keep the feature functional on clean macOS and Windows installations. The Inspector is consolidated into one categorized Tool drop-down to reduce visual clutter.
 
 ## Architecture boundary
 

@@ -61,6 +61,18 @@ class RenderEngineTests(unittest.TestCase):
         self.assertEqual([], render_engine.clip_filter_chain({"filter": "vivid", "filterIntensity": 0}))
         self.assertEqual([], render_engine.clip_filter_chain({"filter": "untrusted", "filterIntensity": 1}))
 
+    def test_all_photo_motion_presets_build_camera_paths(self):
+        for preset in {"push-in", "pull-out", "orbit-left", "orbit-right", "floating-portrait"}:
+            with self.subTest(preset=preset):
+                background, foreground = render_engine.photo_motion_expressions({
+                    "preset": preset, "depthStrength": .8, "travel": .09,
+                    "focusX": .5, "focusY": .45, "edgeFill": 1.08,
+                    "easing": "ease-in-out",
+                }, 30)
+                self.assertEqual({"z", "x", "y"}, set(background))
+                self.assertEqual({"z", "x", "y"}, set(foreground))
+                self.assertNotEqual(background, foreground)
+
     @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg is required")
     def test_all_clip_filter_presets_execute_in_ffmpeg(self):
         presets = {"cinematic", "warm", "cool", "vintage", "mono", "noir", "vivid", "soft", "teal_orange"}
@@ -206,6 +218,39 @@ class RenderEngineTests(unittest.TestCase):
             self.assertEqual([], details["warnings"])
             self.assertNotEqual(self.decoded_frame_digest(baseline, .2),
                                 self.decoded_frame_digest(rendered, .2))
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg is required")
+    def test_depth_separated_photo_motion_is_animated_in_export(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            photo, depth = root / "photo.png", root / "depth.png"
+            subprocess.run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                "testsrc2=size=320x180", "-frames:v", "1", str(photo),
+            ], check=True)
+            subprocess.run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                "color=c=black:size=320x180", "-vf", "drawbox=x=90:y=25:w=140:h=145:color=white:t=fill",
+                "-frames:v", "1", str(depth),
+            ], check=True)
+            spec = {
+                "ratio": "16:9", "fps": 20,
+                "clips": [{
+                    "file": photo.name, "kind": "freeze", "track": 0, "duration": .7,
+                    "crop": {"x": 0, "y": 0, "w": 1, "h": 1},
+                    "photoMotion": {"enabled": True, "preset": "orbit-right",
+                                    "depthMap": depth.name, "depthStrength": .9,
+                                    "travel": .1, "focusX": .5, "focusY": .45,
+                                    "edgeFill": 1.08, "easing": "ease-in-out"},
+                }],
+                "export": {"container": "mp4", "codec": "h264", "width": 320,
+                           "height": 180, "hardware": False, "quality": 30},
+            }
+            output, details = render_engine.render_project("photo-motion", spec, root, root, lambda *_: None)
+            self.assertTrue(output.is_file())
+            self.assertEqual([], details["warnings"])
+            self.assertNotEqual(self.decoded_frame_digest(output, .08),
+                                self.decoded_frame_digest(output, .58))
 
     @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg is required")
     def test_transitions_overlays_titles_music_and_voiceover_render_together(self):

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.0-beta.1
+
+- Added local depth-map generation for imported images and freeze frames, with OpenCV subject segmentation when installed and a dependency-free focal-depth fallback.
+- Added depth-separated foreground/background FFmpeg rendering for genuine 2.5D parallax export.
+- Added Cinematic Push-In, Pull-Out, Orbit Left, Orbit Right and Floating Portrait presets.
+- Added focal point, subject radius, depth strength, camera travel, edge-fill and easing controls plus support for imported grayscale depth maps.
+- Added live browser parallax preview, timeline 3D badges, project persistence, autosave, recovery, undo/redo and depth-asset relinking.
+- Replaced the crowded Inspector tab row with a categorized Tool drop-down that retains every existing panel and adds Export Settings.
+- Images now enter V1 when the project has no primary clip, allowing a photo-motion project to start directly from a still image.
+- Added automated depth-generation, preset-path and end-to-end animated export coverage.
+
 ## 1.4.0-beta.1
 
 - Added a dedicated S1 layer for timed stickers and emoji above the video tracks.

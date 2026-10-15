@@ -23,6 +23,7 @@ const FILTER_PRESETS = [
   {id:"teal_orange",name:"Teal & Orange",description:"Stylized split tone"},
 ];
 const filterPreset = id => FILTER_PRESETS.find(item=>item.id===id)||FILTER_PRESETS[0];
+const defaultPhotoMotion = () => ({enabled:false,preset:"push-in",depthMap:"",depthEngine:"",depthStrength:.75,travel:.08,focusX:.5,focusY:.45,radius:.36,edgeFill:1.08,easing:"ease-in-out"});
 const defaultClip = media => ({
   id: uid(), file: media.file, name: media.name, kind: media.kind === "image" ? "freeze" : "video",
   track: 0, timelineStart: 0, start: 0, end: media.duration || 3, duration: media.kind === "image" ? 3 : undefined,
@@ -32,7 +33,7 @@ const defaultClip = media => ({
   crop: {x:0,y:0,w:1,h:1}, zoom: 1, focusX: .5, focusY: .5, scale: .45,
   positionX: .5, positionY: .5, rotation: 0, mirrorH: false, mirrorV: false,
   stabilize: false, stabilizeStrength: 12, opacity: 1, anchorText: "", tracking: null,
-  keyframes: {}, audioDetached: false
+  keyframes: {}, photoMotion: defaultPhotoMotion(), audioDetached: false
 });
 const defaultAudioClip = (media,start=0,duration=0) => ({
   id:uid(),file:media.file,name:media.name||media.file,start:Math.max(0,Number(start)||0),
@@ -44,7 +45,7 @@ const defaultSticker = (media,start=0,duration=3,emoji="") => ({
   duration:Math.max(.05,Number(duration)||3),x:.5,y:.5,scale:.18,rotation:0,opacity:1,emoji
 });
 const freshProject = () => ({
-  version: "1.4.0-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
+  version: "1.5.0-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
   watermarkOpacity: .55, imageWatermark: {file:"",opacity:.7,scale:.2,x:.8,y:.08}, safeArea: false,
   clips: [], stickers: [], audioClips: [], audio: "", musicVolume: .5, voiceovers: [], audioDucking: true,
   export: {container:"mp4",codec:"h264",width:"",height:"",quality:20,hardware:true,pcmAudio:false}
@@ -68,7 +69,7 @@ function restore(serialized){
   const incoming=typeof serialized==="string"?JSON.parse(serialized):serialized;
   const value=incoming.project||incoming;
   project={...freshProject(),...value,imageWatermark:{...freshProject().imageWatermark,...(value.imageWatermark||{})},export:{...freshProject().export,...(value.export||{})}};
-  project.clips=(value.clips||[]).map(clip=>({...defaultClip({file:clip.file,name:clip.name||clip.file,kind:clip.kind==="freeze"?"image":"video",duration:clip.end||3}),...clip,crop:{x:0,y:0,w:1,h:1,...(clip.crop||{})},keyframes:{...(clip.keyframes||{})}}));
+  project.clips=(value.clips||[]).map(clip=>({...defaultClip({file:clip.file,name:clip.name||clip.file,kind:clip.kind==="freeze"?"image":"video",duration:clip.end||3}),...clip,crop:{x:0,y:0,w:1,h:1,...(clip.crop||{})},keyframes:{...(clip.keyframes||{})},photoMotion:{...defaultPhotoMotion(),...(clip.photoMotion||{})}}));
   project.stickers=(value.stickers||[]).map(item=>({...defaultSticker({file:item.file,name:item.name||item.file},item.start,item.duration,item.emoji),...item}));
   project.audioClips=(value.audioClips||[]).map(item=>({...defaultAudioClip({file:item.file,name:item.name||item.file,duration:item.duration},item.start,item.duration),...item}));
   project.voiceovers=value.voiceovers||[]; selectedClipId=project.clips[0]?.id||"";selectedStickerId="";selectedAudioClipId="";selectedVoiceoverId=""; renderAll();
@@ -148,7 +149,7 @@ function addMediaToTimeline(item){
     pushChange(()=>project.audioClips.push(audio));selectedAudioClipId=audio.id;selectedVoiceoverId="";inspectorTab="audio";renderAll();toast("Added music to A1");return;
   }
   if(item.kind==="lut"){const clip=selectedClip();if(clip)pushChange(()=>clip.lut=item.file);else toast("Select a clip before applying a LUT");return;}
-  const clip=defaultClip(item); if(item.kind==="image"){clip.track=1;clip.timelineStart=playheadTime;clip.scale=.35;}
+  const clip=defaultClip(item); if(item.kind==="image"){clip.track=primaryClips().length?1:0;clip.timelineStart=playheadTime;clip.scale=.35;}
   pushChange(()=>project.clips.push(clip));selectedClipId=clip.id;selectedAudioClipId="";selectedVoiceoverId="";renderAll();seekTimeline(timelineLayout().map.get(clip.id)?.start||0);toast("Added to timeline");
 }
 
@@ -194,8 +195,8 @@ function audioClipHtml(audio,layout,scale){return `<div class="clip audio ${sele
 function clipHtml(clip,layout,scale,kind){
   const transition=clip.transition!=="none"?`<span class="transition-badge">${escapeHtml(clip.transition)}</span>`:"";
   const sequence=Number(clip.track)===0?primaryClips().findIndex(item=>item.id===clip.id)+1:0;
-  const preset=filterPreset(clip.filter),filterBadge=preset.id!=="none"?`<span class="filter-badge">${escapeHtml(preset.name)}</span>`:"";
-  return `<div class="clip ${kind} ${selectedClipId===clip.id?"selected":""}" data-clip="${clip.id}" title="${sequence?"Drag horizontally to rearrange this sequence":"Drag to position overlay"}" style="left:${layout.start*scale}px;width:${Math.max(20,layout.duration*scale)}px"><canvas class="waveform" data-waveform="${escapeHtml(clip.file)}"></canvas><span class="trim left"></span><span class="clip-name">${sequence?`<span class="sequence-number">${sequence}</span>`:""}${escapeHtml(clip.name)}</span>${transition}${filterBadge}<span class="trim right"></span></div>`;
+  const preset=filterPreset(clip.filter),filterBadge=preset.id!=="none"?`<span class="filter-badge">${escapeHtml(preset.name)}</span>`:"",motionBadge=clip.photoMotion?.enabled?'<span class="photo-motion-badge">3D</span>':"";
+  return `<div class="clip ${kind} ${selectedClipId===clip.id?"selected":""}" data-clip="${clip.id}" title="${sequence?"Drag horizontally to rearrange this sequence":"Drag to position overlay"}" style="left:${layout.start*scale}px;width:${Math.max(20,layout.duration*scale)}px"><canvas class="waveform" data-waveform="${escapeHtml(clip.file)}"></canvas><span class="trim left"></span><span class="clip-name">${sequence?`<span class="sequence-number">${sequence}</span>`:""}${escapeHtml(clip.name)}</span>${transition}${filterBadge}${motionBadge}<span class="trim right"></span></div>`;
 }
 function voiceHtml(voice,layout,scale){return `<div class="clip voice ${selectedVoiceoverId===voice.id?"selected":""}" data-voice="${voice.id}" style="left:${layout.start*scale}px;width:${Math.max(20,layout.duration*scale)}px"><span class="clip-name">● ${escapeHtml(voice.name||"Voiceover")}</span></div>`;}
 async function drawWaveforms(){
@@ -210,12 +211,15 @@ const rangeField=(label,prop,min,max,step,value,unit="")=>`<div class="field ran
 const inputField=(label,prop,value,type="number",attrs="")=>`<div class="field"><label>${label}</label><input type="${type}" data-prop="${prop}" value="${escapeHtml(value)}" ${attrs}></div>`;
 const checkField=(label,prop,value)=>`<label class="check"><input type="checkbox" data-prop="${prop}" ${value?"checked":""}> ${label}</label>`;
 function renderInspector(){
-  $$("#inspectorTabs button").forEach(button=>button.classList.toggle("active",button.dataset.tab===inspectorTab));
+  const menu=$("#inspectorMenu");if(menu&&menu.value!==inspectorTab)menu.value=inspectorTab;
   const clip=selectedClip(),sticker=selectedSticker(),audioClip=selectedAudioClip(),voice=selectedVoiceover(),music=highlightedAudio(),image=highlightedImage();
-  $("#selectionLabel").textContent=inspectorTab==="stickers"&&sticker?(sticker.emoji||sticker.name||"Sticker"):audioClip&&inspectorTab==="audio"?(audioClip.name||"Audio"):voice&&inspectorTab==="audio"?(voice.name||"Voiceover"):clip?clip.name:"Project";
+  $("#selectionLabel").textContent=inspectorTab==="export"?"Export":inspectorTab==="stickers"&&sticker?(sticker.emoji||sticker.name||"Sticker"):audioClip&&inspectorTab==="audio"?(audioClip.name||"Audio"):voice&&inspectorTab==="audio"?(voice.name||"Voiceover"):clip?clip.name:"Project";
   const body=$("#inspectorBody");
   const voiceSection=voice?`<div class="section"><h3>Selected voiceover</h3>${rangeField("Voice level","voice.volume",0,4,.01,voice.volume??1,"×")}${inputField("Timeline start","voice.start",voice.start??0,"number",'min="0" step=".01"')}<button data-action="remove-voice" class="danger">Remove selected voiceover</button></div>`:"";
   const musicHint=music?`Highlighted music: <strong>${escapeHtml(music.name)}</strong>`:"Highlight an audio file in Media before replacing.";
+  if(inspectorTab==="export"){
+    const settings=project.export||{};body.innerHTML=`<div class="section"><h3>Export settings</h3><div class="notice">${escapeHtml((settings.container||"mp4").toUpperCase())} · ${escapeHtml((settings.codec||"h264").toUpperCase())}${settings.width&&settings.height?` · ${settings.width}×${settings.height}`:" · project preset"}</div><p class="hint">Container, codec, dimensions, quality, hardware encoding and PCM options are available in the export panel.</p><button data-action="open-export" class="accent">Open export settings</button></div><div class="section"><h3>Render</h3><button data-action="preview">Render preview</button> <button data-action="export">Export video</button></div>`;return;
+  }
   if(inspectorTab==="audio"&&audioClip){
     const linked=project.clips.find(item=>item.id===audioClip.linkedClipId);
     body.innerHTML=`<div class="section"><h3>Independent A1 audio</h3><div class="notice">This audio can move, trim, mute, replace, or delete without changing the video.</div>${rangeField("Level","audio.volume",0,4,.01,audioClip.volume??1,"×")}${checkField("Mute audio","audio.mute",audioClip.mute)}${inputField("Timeline start","audio.start",audioClip.start??0,"number",'min="0" step=".01"')}${inputField("Duration","audio.duration",audioClip.duration??3,"number",'min=".05" step=".01"')}<p class="hint">${musicHint}</p><div class="row"><button data-action="replace-selected-audio" ${music?"":"disabled"}>Replace with highlighted music</button><button data-action="delete-audio" class="danger">Delete audio only</button></div>${linked?'<button data-action="restore-original-audio">Restore original linked audio</button>':""}</div><div class="section"><h3>Voice mix</h3>${checkField("Duck A1 audio under voiceover","project.audioDucking",project.audioDucking)}</div>`;
@@ -231,6 +235,13 @@ function renderInspector(){
   else if(inspectorTab==="transform") body.innerHTML=`<div class="section"><h3>Position & framing</h3>${rangeField("Zoom","zoom",1,8,.01,clip.zoom,"×")}${rangeField("Focus X","focusX",0,1,.01,clip.focusX)}${rangeField("Focus Y","focusY",0,1,.01,clip.focusY)}${Number(clip.track)>0?rangeField("Overlay scale","scale",.05,1,.01,clip.scale):""}${Number(clip.track)>0?rangeField("Position X","positionX",0,1,.01,clip.positionX):""}${Number(clip.track)>0?rangeField("Position Y","positionY",0,1,.01,clip.positionY):""}${rangeField("Rotation","rotation",-180,180,1,clip.rotation,"°")}${checkField("Mirror horizontally","mirrorH",clip.mirrorH)}${checkField("Mirror vertically","mirrorV",clip.mirrorV)}${rangeField("Opacity","opacity",0,1,.01,clip.opacity)}</div><div class="section"><h3>Crop (normalized)</h3>${rangeField("Left","crop.x",0,.95,.01,clip.crop.x)}${rangeField("Top","crop.y",0,.95,.01,clip.crop.y)}${rangeField("Width","crop.w",.05,1,.01,clip.crop.w)}${rangeField("Height","crop.h",.05,1,.01,clip.crop.h)}</div><div class="section"><h3>Stabilization</h3>${checkField("Enable stabilization","stabilize",clip.stabilize)}${rangeField("Strength","stabilizeStrength",4,32,1,clip.stabilizeStrength)}</div>`;
   else if(inspectorTab==="color") body.innerHTML=`<div class="section"><h3>Primary correction</h3>${rangeField("Brightness","brightness",-1,1,.01,clip.brightness)}${rangeField("Contrast","contrast",.1,4,.01,clip.contrast)}${rangeField("Saturation","saturation",0,4,.01,clip.saturation)}${rangeField("Gamma","gamma",.1,4,.01,clip.gamma)}</div><div class="section"><h3>Color balance</h3>${rangeField("Temperature","temperature",-100,100,1,clip.temperature)}${rangeField("Tint","tint",-100,100,1,clip.tint)}${rangeField("Hue","hue",-180,180,1,clip.hue,"°")}${rangeField("Shadows","shadows",-100,100,1,clip.shadows)}${rangeField("Highlights","highlights",-100,100,1,clip.highlights)}<div class="field"><label>3D LUT</label><select data-prop="lut"><option value="">None</option>${media.filter(i=>i.kind==="lut").map(i=>`<option value="${escapeHtml(i.file)}" ${clip.lut===i.file?"selected":""}>${escapeHtml(i.name)}</option>`).join("")}</select></div><button data-action="reset-color">Reset color</button></div>`;
   else if(inspectorTab==="motion") body.innerHTML=`<div class="notice">Start values come from Transform/Color. End values animate linearly across the clip.</div><div class="section"><h3>End keyframe</h3>${rangeField("End zoom","keyframes.zoomEnd",1,8,.01,clip.keyframes.zoomEnd??clip.zoom,"×")}${rangeField("End focus X","keyframes.focusXEnd",0,1,.01,clip.keyframes.focusXEnd??clip.focusX)}${rangeField("End focus Y","keyframes.focusYEnd",0,1,.01,clip.keyframes.focusYEnd??clip.focusY)}${rangeField("End brightness","keyframes.brightnessEnd",-1,1,.01,clip.keyframes.brightnessEnd??clip.brightness)}${rangeField("End contrast","keyframes.contrastEnd",.1,4,.01,clip.keyframes.contrastEnd??clip.contrast)}${rangeField("End saturation","keyframes.saturationEnd",0,4,.01,clip.keyframes.saturationEnd??clip.saturation)}${rangeField("End gamma","keyframes.gammaEnd",.1,4,.01,clip.keyframes.gammaEnd??clip.gamma)}<button data-action="clear-keyframes">Clear keyframes</button></div>`;
+  else if(inspectorTab==="photo3d"){
+    const photo={...defaultPhotoMotion(),...(clip.photoMotion||{})},isStill=clip.kind==="freeze"||mediaByFile(clip.file).kind==="image";
+    if(!isStill)body.innerHTML='<div class="empty">3D Photo Motion works with imported images and freeze frames.</div>';
+    else body.innerHTML=`<div class="section"><h3>3D Photo Motion</h3><div class="notice">A local depth mask separates the foreground and background, then animates them with independent camera movement.</div><div class="motion-preset-grid">${[
+      ["push-in","Cinematic Push-In","Moves into the subject"],["pull-out","Pull-Out","Reveals the scene"],["orbit-left","Orbit Left","Camera arcs left"],["orbit-right","Orbit Right","Camera arcs right"],["floating-portrait","Floating Portrait","Gentle depth drift"]
+    ].map(([id,name,description])=>`<button class="motion-preset ${photo.preset===id?"active":""}" data-photo-preset="${id}"><strong>${name}</strong><small>${description}</small></button>`).join("")}</div></div><div class="section"><h3>Depth generation</h3>${rangeField("Focus X","photoMotion.focusX",.05,.95,.01,photo.focusX)}${rangeField("Focus Y","photoMotion.focusY",.05,.95,.01,photo.focusY)}${rangeField("Subject radius","photoMotion.radius",.12,.75,.01,photo.radius)}<button data-action="generate-photo-depth">${photo.depthMap?"Regenerate depth & motion":"Generate depth & motion"}</button><div class="field"><label>Depth map</label><select data-prop="photoMotion.depthMap"><option value="">None</option>${media.filter(item=>item.kind==="image").map(item=>`<option value="${escapeHtml(item.file)}" ${photo.depthMap===item.file?"selected":""}>${escapeHtml(item.name)}</option>`).join("")}</select></div><p class="hint">${photo.depthMap?`${escapeHtml(photo.depthEngine||"Selected/custom depth map")} · white is foreground, black is background.`:"Set the focus over the main subject, then generate—or import a grayscale depth map."}</p></div><div class="section"><h3>Movement</h3>${checkField("Enable 3D movement","photoMotion.enabled",photo.enabled)}${rangeField("Depth strength","photoMotion.depthStrength",.1,2,.01,photo.depthStrength,"×")}${rangeField("Camera travel","photoMotion.travel",.01,.25,.01,photo.travel)}${rangeField("Edge fill","photoMotion.edgeFill",1.02,1.3,.01,photo.edgeFill,"×")}<div class="field"><label>Easing</label><select data-prop="photoMotion.easing">${[["ease-in-out","Smooth"],["linear","Linear"],["ease-in","Ease in"],["ease-out","Ease out"]].map(([id,name])=>`<option value="${id}" ${photo.easing===id?"selected":""}>${name}</option>`).join("")}</select></div><button data-action="clear-photo-motion" class="danger">Remove 3D motion</button></div>`;
+  }
   else if(inspectorTab==="audio") body.innerHTML=`${voiceSection}<div class="section"><h3>Video clip audio</h3>${clip.audioDetached?'<div class="notice">Original audio is unlinked. The video stays silent until you restore it; its independent audio is on A1 if it has not been deleted.</div>':'<div class="notice">Linked audio follows this video. Unlink it to edit or delete audio without changing the picture.</div>'}${rangeField("Level","volume",0,4,.01,clip.volume,"×")}${checkField("Mute clip audio","mute",clip.mute)}${rangeField("End level","keyframes.volumeEnd",0,4,.01,clip.keyframes.volumeEnd??clip.volume,"×")}<p class="hint">${musicHint}</p><div class="row">${clip.audioDetached?'<button data-action="restore-original-audio">Restore original audio</button>':'<button data-action="unlink-audio">Unlink audio to A1</button>'}<button data-action="replace-selected-audio" ${music?"":"disabled"}>Replace with highlighted music</button></div></div><div class="section"><h3>Voice mix</h3>${checkField("Duck A1 audio under voiceover","project.audioDucking",project.audioDucking)}${project.audio?`${rangeField("Legacy music level","project.musicVolume",0,4,.01,project.musicVolume,"×")}<button data-action="clear-music">Remove legacy music</button>`:""}</div>`;
   else if(inspectorTab==="ai"){
     const tracking=clip.tracking||{};body.innerHTML=`<div class="section"><h3>Subject tracking & mask</h3><div class="notice">Analyze through the clip, then correct the first-frame box manually if needed. The tracked path drives smart reframe and anchored text.</div><button data-action="analyze">Track subject</button> <button data-action="manual-track">Use manual box</button>${tracking.engine?`<p class="hint">${escapeHtml(tracking.engine)}${tracking.path?.length?` · ${tracking.path.length} samples`:""}</p>`:""}${rangeField("Box X","tracking.box.x",0,1,.01,tracking.box?.x??.2)}${rangeField("Box Y","tracking.box.y",0,1,.01,tracking.box?.y??.15)}${rangeField("Box width","tracking.box.w",.05,1,.01,tracking.box?.w??.6)}${rangeField("Box height","tracking.box.h",.05,1,.01,tracking.box?.h??.7)}${checkField("Draw tracked object outline","tracking.outline",tracking.outline)}<button data-action="smart-reframe">Smart reframe</button>${inputField("Anchored text","anchorText",clip.anchorText,"text",'maxlength="120"')} ${tracking.maskUrl?'<label class="check"><input id="showMask" type="checkbox"> Preview segmentation mask</label>':""}</div>`;
@@ -257,7 +268,7 @@ function inspectorInput(event){
   else if(path.startsWith("audio.")){const audio=selectedAudioClip();if(audio)setNested(audio,path.slice(6),value);}
   else if(path.startsWith("sticker.")){const sticker=selectedSticker();if(sticker)setNested(sticker,path.slice(8),value);}
   else setNested(selectedClip(),path,value);
-  const clip=selectedClip();if(clip&&path.startsWith("crop.")){clip.crop.x=clamp(clip.crop.x,0,.95);clip.crop.y=clamp(clip.crop.y,0,.95);clip.crop.w=clamp(clip.crop.w,.05,1-clip.crop.x);clip.crop.h=clamp(clip.crop.h,.05,1-clip.crop.y);}
+  const clip=selectedClip();if(clip&&path==="photoMotion.depthMap"){clip.photoMotion.depthEngine=value?"Selected/custom depth map":"";clip.photoMotion.enabled=Boolean(value)}if(clip&&path.startsWith("crop.")){clip.crop.x=clamp(clip.crop.x,0,.95);clip.crop.y=clamp(clip.crop.y,0,.95);clip.crop.w=clamp(clip.crop.w,.05,1-clip.crop.x);clip.crop.h=clamp(clip.crop.h,.05,1-clip.crop.y);}
   const output=control.nextElementSibling;if(output?.tagName==="OUTPUT")output.textContent=`${Number(value).toFixed(Number(control.step)<1?2:0)}${output.textContent.replace(/[-\d.]/g,"")}`;
   snapshot(false);applyPreviewEffects();renderTimeline();
 }
@@ -286,8 +297,30 @@ function renderStickerPreview(){
   }).join("");
 }
 
+function previewEase(value,mode){const p=clamp(value,0,1);if(mode==="linear")return p;if(mode==="ease-in")return p*p;if(mode==="ease-out")return 1-(1-p)*(1-p);return p*p*(3-2*p);}
+function renderPhotoMotionPreview(clip,filter,clipPath){
+  const layer=$("#photoMotionLayer"),background=$("#photoMotionBackground"),foreground=$("#photoMotionForeground"),photo={...defaultPhotoMotion(),...(clip?.photoMotion||{})};
+  const imageMode=clip&&(clip.kind==="freeze"||mediaByFile(clip.file).kind==="image"),enabled=Boolean(imageMode&&photo.enabled&&photo.depthMap);
+  layer.style.display=enabled?"block":"none";if(!enabled)return false;
+  const item=mediaByFile(clip.file),depth=mediaByFile(photo.depthMap),layout=timelineLayout().map.get(clip.id),progress=layout?clamp((playheadTime-layout.start)/Math.max(.05,layout.duration),0,1):0,eased=previewEase(progress,photo.easing);
+  if(background.src!==new URL(item.url,location.href).href)background.src=item.url;if(foreground.src!==new URL(item.url,location.href).href)foreground.src=item.url;
+  const strength=clamp(photo.depthStrength,.1,2),travel=clamp(photo.travel,.01,.25),edge=clamp(photo.edgeFill,1.02,1.3),overlay=Number(clip.track)>0,baseScale=overlay?Number(clip.scale):1,positionX=overlay?(Number(clip.positionX)-.5)*100:0,positionY=overlay?(Number(clip.positionY)-.5)*100:0;
+  let bgScale=edge,fgScale=edge,bgX=0,bgY=0,fgX=0,fgY=0;
+  if(photo.preset==="pull-out"){bgScale+=travel*.35*(1-eased);fgScale+=travel*(1+strength)*(1-eased)}
+  else if(photo.preset==="orbit-left"||photo.preset==="orbit-right"){
+    const direction=photo.preset==="orbit-left"?1:-1;bgScale+=travel*.35*eased;fgScale+=travel*(1+strength)*.5*eased;bgX=direction*travel*35*eased;fgX=-direction*travel*strength*100*eased;fgY=-travel*strength*22*eased;
+  }else if(photo.preset==="floating-portrait"){
+    const wave=Math.sin(progress*Math.PI*2),lift=Math.sin(progress*Math.PI);bgScale+=travel*.35*lift;fgScale+=travel*(1+strength)*.4*lift;bgX=-travel*8*wave;fgX=travel*strength*70*wave;fgY=-travel*strength*45*lift;
+  }else{bgScale+=travel*.35*eased;fgScale+=travel*(1+strength)*eased}
+  const sx=clip.mirrorH?-1:1,sy=clip.mirrorV?-1:1,baseZoom=Number(clip.zoom)||1,rotation=Number(clip.rotation)||0;
+  background.style.transform=`translate(${positionX+bgX}%,${positionY+bgY}%) scale(${sx*baseZoom*baseScale*bgScale},${sy*baseZoom*baseScale*bgScale}) rotate(${rotation}deg)`;
+  foreground.style.transform=`translate(${positionX+fgX}%,${positionY+fgY}%) scale(${sx*baseZoom*baseScale*fgScale},${sy*baseZoom*baseScale*fgScale}) rotate(${rotation}deg)`;
+  for(const element of [background,foreground]){element.style.filter=filter;element.style.opacity=clip.opacity;element.style.clipPath=clipPath}
+  const maskUrl=`url("${depth.url}")`;foreground.style.webkitMaskImage=maskUrl;foreground.style.maskImage=maskUrl;foreground.style.webkitMaskSize="cover";foreground.style.maskSize="cover";foreground.style.webkitMaskPosition="center";foreground.style.maskPosition="center";foreground.style.webkitMaskRepeat="no-repeat";foreground.style.maskRepeat="no-repeat";return true;
+}
+
 function applyPreviewEffects(){
-  const clip=selectedClip(); const imageMode=clip?.kind==="freeze"; preview.style.display=imageMode?"none":"block";stillPreview.style.display=imageMode?"block":"none";
+  const clip=selectedClip(); const imageMode=clip&&(clip.kind==="freeze"||mediaByFile(clip.file).kind==="image"); preview.style.display=imageMode?"none":"block";stillPreview.style.display=imageMode?"block":"none";
   if(clip){
     const progress=clip.kind==="freeze"?0:clamp((preview.currentTime-clip.start)/Math.max(.05,clip.end-clip.start),0,1),mix=(start,end)=>Number(start)+(Number(end??start)-Number(start))*progress;
     const rawBrightness=1+mix(clip.brightness,clip.keyframes?.brightnessEnd),rawContrast=mix(clip.contrast,clip.keyframes?.contrastEnd),saturation=mix(clip.saturation,clip.keyframes?.saturationEnd),gamma=mix(clip.gamma,clip.keyframes?.gammaEnd),hue=Number(clip.hue),temp=Number(clip.temperature),tint=Number(clip.tint),shadows=Number(clip.shadows),highlights=Number(clip.highlights),zoom=mix(clip.zoom,clip.keyframes?.zoomEnd),focusX=mix(clip.focusX,clip.keyframes?.focusXEnd),focusY=mix(clip.focusY,clip.keyframes?.focusYEnd);
@@ -299,10 +332,11 @@ function applyPreviewEffects(){
     const sx=clip.mirrorH?-1:1,sy=clip.mirrorV?-1:1,overlay=Number(clip.track)>0,baseScale=overlay?Number(clip.scale):1;const transform=`scale(${sx*zoom*baseScale},${sy*zoom*baseScale}) rotate(${clip.rotation}deg)`;
     const crop=clip.crop||{x:0,y:0,w:1,h:1},clipPath=`inset(${clamp(crop.y,0,1)*100}% ${clamp(1-crop.x-crop.w,0,1)*100}% ${clamp(1-crop.y-crop.h,0,1)*100}% ${clamp(crop.x,0,1)*100}%)`;
     for(const element of [preview,stillPreview]){element.style.filter=filter;element.style.transform=transform;element.style.transformOrigin=`${focusX*100}% ${focusY*100}%`;element.style.opacity=clip.opacity;element.style.clipPath=clipPath;element.style.left=overlay?`${(clip.positionX-.5)*100}%`:"0";element.style.top=overlay?`${(clip.positionY-.5)*100}%`:"0";}
+    if(renderPhotoMotionPreview(clip,filter,clipPath))stillPreview.style.display="none";
     const tracking=clip.tracking;const box=$("#subjectBox");box.style.display=tracking?.box?"block":"none";if(tracking?.box){Object.assign(box.style,{left:`${tracking.box.x*100}%`,top:`${tracking.box.y*100}%`,width:`${tracking.box.w*100}%`,height:`${tracking.box.h*100}%`})}
     const anchor=$("#anchorOverlay");anchor.textContent=clip.anchorText||"";anchor.style.display=clip.anchorText?"block":"none";anchor.style.left=`${(tracking?.focus?.x??clip.focusX)*100}%`;anchor.style.top=`${(tracking?.focus?.y??clip.focusY)*100}%`;
     if(previewGain)previewGain.gain.value=clip.mute?0:mix(clip.volume,clip.keyframes?.volumeEnd);
-  }
+  }else $("#photoMotionLayer").style.display="none";
   $("#titleOverlay").textContent=project.title;$("#titleOverlay").style.display=project.title?"block":"none";$("#textWatermark").textContent=project.watermark;$("#textWatermark").style.opacity=project.watermarkOpacity;
   $("#safeArea").style.display=project.safeArea?"block":"none"; stage.className=`stage ratio-${project.ratio.replace(":","-")}`;
   const wm=$("#imageWatermark"),conf=project.imageWatermark,item=mediaByFile(conf.file);wm.style.display=conf.file?"block":"none";if(conf.file)wm.src=item.url;Object.assign(wm.style,{width:`${conf.scale*100}%`,opacity:conf.opacity,left:`${conf.x*100}%`,top:`${conf.y*100}%`});
@@ -423,6 +457,7 @@ function restoreOriginalAudio(){
 function action(name){
   const clip=selectedClip(),sticker=selectedSticker(),audioClip=selectedAudioClip(),layout=clip&&timelineLayout().map.get(clip.id);
   if(name==="import")return $("#mediaFiles").click();
+  if(name==="open-export")return openExportDialog();
   if(name==="new"){if(!confirm("Start a new project? The current project will be kept as the previous recovery snapshot."))return;const current=localStorage.getItem("vdodesk.autosave")||JSON.stringify({project,media,at:Date.now()});localStorage.setItem("vdodesk.recovery.previous",current);history=[];future=[];project=freshProject();selectedClipId="";selectedStickerId="";selectedAudioClipId="";selectedVoiceoverId="";snapshot(false);renderAll();return}
   if(name==="save")return saveProject(); if(name==="open")return $("#projectFile").click(); if(name==="export")return openExportDialog(); if(name==="preview")return startRender(true);
   if(name==="undo"&&history.length){future.push(JSON.stringify(project));restore(history.pop());snapshot(false);return}if(name==="redo"&&future.length){history.push(JSON.stringify(project));restore(future.pop());snapshot(false);return}
@@ -443,12 +478,18 @@ function action(name){
   if(name==="remove-voice"&&selectedVoiceoverId)return pushChange(()=>{project.voiceovers=project.voiceovers.filter(voice=>voice.id!==selectedVoiceoverId);selectedVoiceoverId=""});
   if(name==="reset-color"&&clip)return pushChange(()=>Object.assign(clip,{brightness:0,contrast:1,saturation:1,gamma:1,temperature:0,tint:0,hue:0,shadows:0,highlights:0,lut:""}));
   if(name==="reset-filter"&&clip)return pushChange(()=>Object.assign(clip,{filter:"none",filterIntensity:1}));
+  if(name==="generate-photo-depth"&&clip)return generatePhotoMotion(clip);
+  if(name==="clear-photo-motion"&&clip)return pushChange(()=>clip.photoMotion=defaultPhotoMotion());
   if(name==="clear-keyframes"&&clip)return pushChange(()=>clip.keyframes={});if(name==="clear-music")return pushChange(()=>project.audio="");
   if(name==="analyze"&&clip)return analyze(clip,false);if(name==="manual-track"&&clip)return analyze(clip,true);if(name==="smart-reframe"&&clip){if(!clip.tracking?.focus)return toast("Analyze or define a subject first");return pushChange(()=>{const path=clip.tracking.path||[],first=path[0]||clip.tracking.focus,last=path.at(-1)||first;clip.focusX=first.x;clip.focusY=first.y;clip.zoom=Math.max(1,Math.min(3,.72/Math.max(clip.tracking.box.w,clip.tracking.box.h)));clip.keyframes.focusXEnd=last.x;clip.keyframes.focusYEnd=last.y;clip.keyframes.zoomEnd=clip.zoom});}
   if(name==="recover"){const saved=localStorage.getItem("vdodesk.autosave");saved?restore(saved):toast("No recovery snapshot found");return}if(name==="recover-previous"){const saved=localStorage.getItem("vdodesk.recovery.previous");saved?restore(saved):toast("No previous-project snapshot found");return}if(name==="clear-recovery"){localStorage.removeItem("vdodesk.autosave");localStorage.removeItem("vdodesk.recovery.previous");toast("Recovery snapshots cleared");return}
 }
 async function createFreeze(clip){try{const item=await api("/api/freeze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({file:clip.file,at:preview.currentTime||clip.start})});media.unshift(item);const freeze=defaultClip(item);freeze.kind="freeze";freeze.duration=3;freeze.end=3;const index=project.clips.indexOf(clip);snapshot(true);project.clips.splice(index+1,0,freeze);selectedClipId=freeze.id;renderAll();toast("Freeze frame inserted")}catch(error){toast(error.message)}}
 async function analyze(clip,manual){try{toast("Tracking subject through clip…");const box=manual?(clip.tracking?.box||{x:.2,y:.15,w:.6,h:.7}):undefined;const result=await api("/api/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({file:clip.file,at:preview.currentTime||clip.start,end:clip.end,manualBox:box})});snapshot(true);clip.tracking={...result,outline:clip.tracking?.outline||false};renderInspector();applyPreviewEffects();toast(result.engine)}catch(error){toast(error.message)}}
+async function generatePhotoMotion(clip){
+  const item=mediaByFile(clip.file),photo={...defaultPhotoMotion(),...(clip.photoMotion||{})};if(!(clip.kind==="freeze"||item.kind==="image"))return toast("Select an image or freeze frame first");
+  try{toast("Generating local depth map…");const result=await api("/api/photo-depth",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({file:clip.file,focusX:photo.focusX,focusY:photo.focusY,radius:photo.radius})});snapshot(true);media=media.filter(value=>value.file!==result.file);media.unshift(result);clip.photoMotion={...photo,enabled:true,depthMap:result.file,depthEngine:result.depthEngine||"Local depth map"};await refreshRecent();renderAll();toast(`3D Photo Motion ready · ${clip.photoMotion.depthEngine}`)}catch(error){toast(`3D motion failed: ${error.message}`)}
+}
 function saveProject(){project.name=$("#projectName").value||"Untitled project";const blob=new Blob([JSON.stringify(project,null,2)],{type:"application/json"});const link=document.createElement("a");link.href=URL.createObjectURL(blob);link.download=project.name.replace(/[^\w -]/g,"_")+".vdodesk.json";link.click();URL.revokeObjectURL(link.href);$("#saveState").textContent="Project downloaded";}
 function syncExportOptions(){const webm=$("#exportContainer").value==="webm",codec=$("#exportCodec");if(webm)codec.value="vp9";else if(codec.value==="vp9")codec.value="h264";[...codec.options].forEach(option=>option.disabled=webm?option.value!=="vp9":option.value==="vp9");$("#pcmAudio").disabled=$("#exportContainer").value!=="mov";if($("#pcmAudio").disabled)$("#pcmAudio").checked=false;}
 function openExportDialog(){const settings=project.export||{};$("#exportContainer").value=settings.container||"mp4";$("#exportCodec").value=settings.codec||"h264";$("#exportWidth").value=settings.width||"";$("#exportHeight").value=settings.height||"";$("#exportQuality").value=settings.quality??20;$("#hardwareExport").checked=settings.hardware!==false;$("#pcmAudio").checked=Boolean(settings.pcmAudio);syncExportOptions();$("#exportDialog").showModal();}
@@ -467,6 +508,7 @@ document.addEventListener("click",event=>{
   if(suppressTimelineClick){suppressTimelineClick=false;event.preventDefault();return}
   const actionNode=event.target.closest("[data-action]");if(actionNode){event.preventDefault();action(actionNode.dataset.action);return}
   const filterNode=event.target.closest("[data-filter]");if(filterNode){event.preventDefault();const clip=selectedClip();if(clip)pushChange(()=>{clip.filter=filterNode.dataset.filter;clip.filterIntensity=clip.filterIntensity??1});return}
+  const photoPreset=event.target.closest("[data-photo-preset]");if(photoPreset){event.preventDefault();const clip=selectedClip();if(clip)pushChange(()=>{clip.photoMotion={...defaultPhotoMotion(),...(clip.photoMotion||{}),preset:photoPreset.dataset.photoPreset}});return}
   const emojiNode=event.target.closest("[data-emoji]");if(emojiNode){event.preventDefault();addEmojiSticker(emojiNode.dataset.emoji);return}
   const add=event.target.closest("[data-add]");if(add){event.stopPropagation();addMediaToTimeline(mediaByFile(add.dataset.add));return}
   const card=event.target.closest("[data-media]");if(card){selectedMediaFile=card.dataset.media;renderLibrary();renderInspector();return}
@@ -476,11 +518,11 @@ document.addEventListener("click",event=>{
   const voiceNode=event.target.closest("[data-voice]");if(voiceNode){selectedStickerId="";selectedAudioClipId="";selectedVoiceoverId=voiceNode.dataset.voice;inspectorTab="audio";playheadTime=Number(selectedVoiceover()?.start)||0;renderTimeline();renderInspector();updateTimecode();return}
   const clipNode=event.target.closest("[data-clip]");if(clipNode){selectedStickerId="";selectedClipId=clipNode.dataset.clip;selectedAudioClipId="";selectedVoiceoverId="";const item=timelineLayout().map.get(selectedClipId);seekTimeline(item.start);renderAll();return}
 });
-$("#inspectorTabs").addEventListener("click",event=>{const button=event.target.closest("[data-tab]");if(button){inspectorTab=button.dataset.tab;renderInspector()}});
+$("#inspectorMenu").addEventListener("change",event=>{inspectorTab=event.target.value;renderInspector()});
 $$('[data-library]').forEach(button=>button.addEventListener("click",()=>{libraryView=button.dataset.library;$$('[data-library]').forEach(b=>b.classList.toggle("active",b===button));renderLibrary()}));
 $("#mediaFiles").addEventListener("change",event=>importFiles(event.target.files));
 $("#projectFile").addEventListener("change",async event=>{try{restore(await event.target.files[0].text());snapshot(false);toast("Project opened") }catch(error){toast(`Invalid project: ${error.message}`)}});
-$("#relinkFile").addEventListener("change",async event=>{try{const old=selectedMediaFile,item=await uploadFile(event.target.files[0]);snapshot(true);project.clips.filter(c=>c.file===old).forEach(c=>{c.file=item.file;c.name=item.name});project.stickers.filter(c=>c.file===old).forEach(c=>{c.file=item.file;c.name=item.name});project.audioClips.filter(c=>c.file===old).forEach(c=>{c.file=item.file;c.name=item.name});project.voiceovers.filter(c=>c.file===old).forEach(c=>c.file=item.file);if(project.audio===old)project.audio=item.file;if(project.imageWatermark.file===old)project.imageWatermark.file=item.file;selectedMediaFile=item.file;renderAll();toast("All project references relinked")}catch(error){toast(error.message)}});
+$("#relinkFile").addEventListener("change",async event=>{try{const old=selectedMediaFile,item=await uploadFile(event.target.files[0]);snapshot(true);project.clips.filter(c=>c.file===old).forEach(c=>{c.file=item.file;c.name=item.name});project.clips.filter(c=>c.photoMotion?.depthMap===old).forEach(c=>c.photoMotion.depthMap=item.file);project.stickers.filter(c=>c.file===old).forEach(c=>{c.file=item.file;c.name=item.name});project.audioClips.filter(c=>c.file===old).forEach(c=>{c.file=item.file;c.name=item.name});project.voiceovers.filter(c=>c.file===old).forEach(c=>c.file=item.file);if(project.audio===old)project.audio=item.file;if(project.imageWatermark.file===old)project.imageWatermark.file=item.file;selectedMediaFile=item.file;renderAll();toast("All project references relinked")}catch(error){toast(error.message)}});
 $("#projectName").addEventListener("input",event=>{project.name=event.target.value;snapshot(false)});
 $("#timelineZoom").addEventListener("input",renderTimeline);$("#proxyToggle").addEventListener("change",()=>loadSelectedPreview(false));
 $("#inspectorBody").addEventListener("change",event=>{if(event.target.matches("[data-project]")){rememberUndoState();const value=event.target.type==="checkbox"?event.target.checked:event.target.dataset.project==="fps"?Number(event.target.value):event.target.value;setNested(project,event.target.dataset.project,value);snapshot(false);renderAll()}if(event.target.id==="showMask")applyPreviewEffects()});
@@ -670,7 +712,7 @@ let watermarkDrag=null;$("#imageWatermark").addEventListener("pointerdown",event
 document.addEventListener("keydown",event=>{if(["INPUT","SELECT","TEXTAREA"].includes(event.target.tagName))return;const actions={" ":"play",ArrowLeft:"step-back",ArrowRight:"step-forward",Home:"timeline-start",End:"timeline-end","[":"clip-start","]":"clip-end",Delete:"delete",Backspace:"delete"};if(actions[event.key]){event.preventDefault();action(actions[event.key])}if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="z"){event.preventDefault();action(event.shiftKey?"redo":"undo")}});
 
 async function initialize(){
-  const autosave=localStorage.getItem("vdodesk.autosave");if(autosave){try{const saved=JSON.parse(autosave);project={...freshProject(),...(saved.project||{})};project.stickers=(project.stickers||[]).map(item=>({...defaultSticker({file:item.file,name:item.name||item.file},item.start,item.duration,item.emoji),...item}));media=saved.media||[];}catch{}}
+  const autosave=localStorage.getItem("vdodesk.autosave");if(autosave){try{const saved=JSON.parse(autosave);project={...freshProject(),...(saved.project||{})};project.clips=(project.clips||[]).map(clip=>({...clip,photoMotion:{...defaultPhotoMotion(),...(clip.photoMotion||{})}}));project.stickers=(project.stickers||[]).map(item=>({...defaultSticker({file:item.file,name:item.name||item.file},item.start,item.duration,item.emoji),...item}));media=saved.media||[];}catch{}}
   try{const status=await api("/api/status");$("#version").textContent=`${status.version} · local`;const caps=status.capabilities||{};$("#capabilities").textContent=`Available: ${caps.h264VideoToolbox?"Apple VideoToolbox H.264/HEVC":"software H.264/H.265"}${caps.vp9?", VP9":""}${status.opencv?` · OpenCV ${status.opencv}`:" · manual tracking fallback"}`;}catch(error){toast(error.message)}
   try{await refreshWorkspaceMedia();}catch(error){toast(error.message)}
   await refreshRecent();renderAll();

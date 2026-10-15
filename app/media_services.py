@@ -7,7 +7,9 @@ from pathlib import Path
 import json
 import math
 import shutil
+import struct
 import subprocess
+import zlib
 
 
 def run(command, timeout=1200):
@@ -123,6 +125,85 @@ def extract_freeze(source: Path, target: Path, at: float):
         "-i", str(source), "-frames:v", "1", "-q:v", "2", str(target),
     ], timeout=120)
     return target
+
+
+def _write_gray_png(path: Path, width: int, height: int, pixels):
+    """Write an 8-bit grayscale PNG without adding a runtime dependency."""
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+    rows = bytearray()
+    for y in range(height):
+        rows.append(0)
+        start = y * width
+        rows.extend(pixels[start:start + width])
+    raw = b"\x89PNG\r\n\x1a\n"
+    raw += chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
+    raw += chunk(b"IDAT", zlib.compress(bytes(rows), 9)) + chunk(b"IEND", b"")
+    path.write_bytes(raw)
+
+
+def create_photo_depth_map(source: Path, target: Path, focus_x=.5, focus_y=.45, radius=.36):
+    """Create a soft foreground depth mask for single-photo parallax.
+
+    OpenCV uses face-guided GrabCut when available. The dependency-free path
+    creates a feathered focal-depth mask, so Photo Motion remains usable on a
+    clean Windows/macOS installation.
+    """
+    focus_x = max(0.05, min(.95, float(focus_x)))
+    focus_y = max(0.05, min(.95, float(focus_y)))
+    radius = max(.12, min(.75, float(radius)))
+    info = probe_media(source)
+    source_width, source_height = int(info.get("width") or 0), int(info.get("height") or 0)
+    if source_width < 2 or source_height < 2:
+        raise ValueError("Unable to read image dimensions")
+    scale = min(1, 1280 / max(source_width, source_height))
+    width, height = max(2, round(source_width * scale)), max(2, round(source_height * scale))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        import cv2
+        import numpy as np
+        frame = cv2.imread(str(source), cv2.IMREAD_COLOR)
+        if frame is None:
+            raise ValueError("OpenCV could not read the image")
+        frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        faces = cascade.detectMultiScale(gray, 1.12, 5, minSize=(30, 30))
+        if len(faces):
+            fx, fy, fw, fh = max(faces, key=lambda box: box[2] * box[3])
+            x = max(1, fx - fw); y = max(1, fy - round(fh * .85))
+            w = min(width - x - 1, fw * 3); h = min(height - y - 1, round(fh * 4.3))
+            engine = "OpenCV face-guided depth"
+        else:
+            w, h = round(width * radius * 2), round(height * min(.9, radius * 2.5))
+            x, y = round(width * focus_x - w / 2), round(height * focus_y - h / 2)
+            x=max(1,min(width-3,x));y=max(1,min(height-3,y));w=max(2,min(width-x-1,w));h=max(2,min(height-y-1,h))
+            engine = "OpenCV focal-subject depth"
+        mask = np.zeros((height, width), np.uint8)
+        background = np.zeros((1, 65), np.float64)
+        foreground = np.zeros((1, 65), np.float64)
+        cv2.grabCut(frame, mask, (x, y, w, h), background, foreground, 5, cv2.GC_INIT_WITH_RECT)
+        mask = np.where((mask == 1) | (mask == 3), 255, 0).astype("uint8")
+        sigma = max(2, round(max(width, height) * .012))
+        mask = cv2.GaussianBlur(mask, (0, 0), sigmaX=sigma, sigmaY=sigma)
+        if int(mask.max()) < 64 or int(np.count_nonzero(mask)) < width * height * .01:
+            raise ValueError("Subject mask was too small")
+        if not cv2.imwrite(str(target), mask):
+            raise ValueError("Unable to save depth map")
+        return {"engine": engine, "width": width, "height": height}
+    except Exception as error:
+        pixels = bytearray(width * height)
+        for y in range(height):
+            normalized_y = ((y + .5) / height - focus_y) / (radius * 1.28)
+            for x in range(width):
+                normalized_x = ((x + .5) / width - focus_x) / radius
+                distance = math.sqrt(normalized_x * normalized_x + normalized_y * normalized_y)
+                fade = max(0, min(1, (1 - distance) / .72))
+                fade = fade * fade * (3 - 2 * fade)
+                pixels[y * width + x] = round(255 * fade)
+        _write_gray_png(target, width, height, pixels)
+        return {"engine": "Local focal-depth fallback", "width": width, "height": height,
+                "warning": str(error)}
 
 
 def analyze_subject(source: Path, at: float, manual_box=None, output_mask: Path | None = None, end: float | None = None):
