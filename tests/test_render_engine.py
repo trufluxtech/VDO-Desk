@@ -174,6 +174,40 @@ class RenderEngineTests(unittest.TestCase):
             self.assertGreater(self.decoded_audio_rms(replaced), 100)
 
     @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg is required")
+    def test_timed_sticker_is_composited_into_export(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, sticker = root / "source.mp4", root / "sticker.png"
+            subprocess.run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                "color=c=navy:s=160x90:r=20:d=0.8", "-f", "lavfi", "-i",
+                "anullsrc=channel_layout=stereo:sample_rate=48000", "-shortest",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(source),
+            ], check=True)
+            subprocess.run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                "color=c=yellow:s=48x32", "-frames:v", "1", str(sticker),
+            ], check=True)
+            base_spec = {
+                "ratio": "16:9", "fps": 20,
+                "clips": [{"file": source.name, "track": 0, "start": 0, "end": .7,
+                           "speed": 1, "crop": {"x": 0, "y": 0, "w": 1, "h": 1}}],
+                "export": {"container": "mp4", "codec": "h264", "width": 320,
+                           "height": 180, "hardware": False, "quality": 30},
+            }
+            baseline, _ = render_engine.render_project("sticker-baseline", base_spec, root, root, lambda *_: None)
+            sticker_spec = copy.deepcopy(base_spec)
+            sticker_spec["stickers"] = [{
+                "file": sticker.name, "name": "Test sticker", "start": .1, "duration": .35,
+                "x": .5, "y": .5, "scale": .3, "rotation": 12, "opacity": .8,
+            }]
+            rendered, details = render_engine.render_project("sticker-rendered", sticker_spec, root, root, lambda *_: None)
+            self.assertTrue(rendered.is_file())
+            self.assertEqual([], details["warnings"])
+            self.assertNotEqual(self.decoded_frame_digest(baseline, .2),
+                                self.decoded_frame_digest(rendered, .2))
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg is required")
     def test_transitions_overlays_titles_music_and_voiceover_render_together(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -39,15 +39,19 @@ const defaultAudioClip = (media,start=0,duration=0) => ({
   duration:Math.max(.05,Number(duration)||Number(media.duration)||3),sourceStart:0,
   speed:1,reverse:false,volume:1,mute:false,linkedClipId:""
 });
+const defaultSticker = (media,start=0,duration=3,emoji="") => ({
+  id:uid(),file:media.file,name:media.name||emoji||"Sticker",start:Math.max(0,Number(start)||0),
+  duration:Math.max(.05,Number(duration)||3),x:.5,y:.5,scale:.18,rotation:0,opacity:1,emoji
+});
 const freshProject = () => ({
-  version: "1.3.0-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
+  version: "1.4.0-beta.1", name: "Untitled project", ratio: "16:9", fps: 30, title: "", watermark: "",
   watermarkOpacity: .55, imageWatermark: {file:"",opacity:.7,scale:.2,x:.8,y:.08}, safeArea: false,
-  clips: [], audioClips: [], audio: "", musicVolume: .5, voiceovers: [], audioDucking: true,
+  clips: [], stickers: [], audioClips: [], audio: "", musicVolume: .5, voiceovers: [], audioDucking: true,
   export: {container:"mp4",codec:"h264",width:"",height:"",quality:20,hardware:true,pcmAudio:false}
 });
 
 let project = freshProject();
-let media = [], recent = [], selectedClipId = "", selectedAudioClipId = "", selectedVoiceoverId = "", selectedMediaFile = "", libraryView = "project", inspectorTab = "clip";
+let media = [], recent = [], selectedClipId = "", selectedStickerId = "", selectedAudioClipId = "", selectedVoiceoverId = "", selectedMediaFile = "", libraryView = "project", inspectorTab = "clip";
 let history = [], future = [], playheadTime = 0, isPlayingTimeline = false, saveTimer, toastTimer, waveformCache = new Map();
 let audioContext, previewSource, previewGain, recorder, recordChunks = [], recordStart = 0;
 let suppressTimelineClick = false;
@@ -65,15 +69,18 @@ function restore(serialized){
   const value=incoming.project||incoming;
   project={...freshProject(),...value,imageWatermark:{...freshProject().imageWatermark,...(value.imageWatermark||{})},export:{...freshProject().export,...(value.export||{})}};
   project.clips=(value.clips||[]).map(clip=>({...defaultClip({file:clip.file,name:clip.name||clip.file,kind:clip.kind==="freeze"?"image":"video",duration:clip.end||3}),...clip,crop:{x:0,y:0,w:1,h:1,...(clip.crop||{})},keyframes:{...(clip.keyframes||{})}}));
+  project.stickers=(value.stickers||[]).map(item=>({...defaultSticker({file:item.file,name:item.name||item.file},item.start,item.duration,item.emoji),...item}));
   project.audioClips=(value.audioClips||[]).map(item=>({...defaultAudioClip({file:item.file,name:item.name||item.file,duration:item.duration},item.start,item.duration),...item}));
-  project.voiceovers=value.voiceovers||[]; selectedClipId=project.clips[0]?.id||"";selectedAudioClipId="";selectedVoiceoverId=""; renderAll();
+  project.voiceovers=value.voiceovers||[]; selectedClipId=project.clips[0]?.id||"";selectedStickerId="";selectedAudioClipId="";selectedVoiceoverId=""; renderAll();
 }
 function toast(message){const node=$("#toast");node.textContent=message;node.classList.add("show");clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.classList.remove("show"),2600);}
 function selectedClip(){return project.clips.find(clip=>clip.id===selectedClipId);}
+function selectedSticker(){return project.stickers.find(item=>item.id===selectedStickerId);}
 function selectedAudioClip(){return project.audioClips.find(clip=>clip.id===selectedAudioClipId);}
 function selectedVoiceover(){return project.voiceovers.find(voice=>voice.id===selectedVoiceoverId);}
 function mediaByFile(file){return [...media,...recent].find(item=>item.file===file)||{file,name:file,url:"/media/"+encodeURIComponent(file),duration:0,kind:"video"};}
 function highlightedAudio(){return [...media,...recent].find(item=>item.file===selectedMediaFile&&item.kind==="audio");}
+function highlightedImage(){return [...media,...recent].find(item=>item.file===selectedMediaFile&&item.kind==="image");}
 function primaryClips(){return project.clips.filter(clip=>Number(clip.track)===0);}
 function durationOf(clip){return clip.kind==="freeze"?clamp(clip.duration,.1,3600):Math.max(.05,(Number(clip.end)-Number(clip.start))/clamp(clip.speed,.25,4));}
 function timelineLayout(){
@@ -83,6 +90,7 @@ function timelineLayout(){
     const start=Math.max(0,cursor-overlap); map.set(clip.id,{start,duration:durationOf(clip)}); cursor=start+durationOf(clip);
   }
   for(const clip of project.clips.filter(item=>Number(item.track)>0)) map.set(clip.id,{start:Number(clip.timelineStart)||0,duration:durationOf(clip)});
+  for(const sticker of project.stickers) map.set(sticker.id,{start:Number(sticker.start)||0,duration:Math.max(.05,Number(sticker.duration)||.05)});
   for(const audio of project.audioClips) map.set(audio.id,{start:Number(audio.start)||0,duration:Math.max(.05,Number(audio.duration)||.05)});
   for(const voice of project.voiceovers) map.set(voice.id,{start:Number(voice.start)||0,duration:Number(voice.duration)||3});
   const total=Math.max(cursor,...[...map.values()].map(item=>item.start+item.duration),1);
@@ -144,6 +152,21 @@ function addMediaToTimeline(item){
   pushChange(()=>project.clips.push(clip));selectedClipId=clip.id;selectedAudioClipId="";selectedVoiceoverId="";renderAll();seekTimeline(timelineLayout().map.get(clip.id)?.start||0);toast("Added to timeline");
 }
 
+function addStickerFromMedia(item,emoji=""){
+  if(!item||item.kind!=="image")return toast("Highlight an imported image first");
+  const baseTotal=Math.max(1,timelineLayout().total),duration=Math.max(.05,Math.min(3,baseTotal-playheadTime||3));
+  const sticker=defaultSticker(item,playheadTime,duration,emoji);snapshot(true);project.stickers.push(sticker);
+  selectedStickerId=sticker.id;selectedAudioClipId="";selectedVoiceoverId="";inspectorTab="stickers";renderAll();toast(`${emoji||item.name} added to S1`);
+}
+async function addEmojiSticker(emoji){
+  try{
+    const canvas=document.createElement("canvas");canvas.width=canvas.height=256;const context=canvas.getContext("2d");
+    context.clearRect(0,0,256,256);context.textAlign="center";context.textBaseline="middle";context.font='176px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';context.fillText(emoji,128,132);
+    const blob=await new Promise((resolve,reject)=>canvas.toBlob(value=>value?resolve(value):reject(new Error("The browser could not create this emoji image")),"image/png"));
+    const item=await uploadFile(new File([blob],`emoji-${Date.now()}.png`,{type:"image/png"}));addStickerFromMedia(item,emoji);
+  }catch(error){toast(`Emoji could not be added: ${error.message}`)}
+}
+
 function renderLibrary(){
   const list=libraryView==="recent"?recent:media;
   $("#mediaList").innerHTML=list.length?list.map(item=>`<div class="media-card ${selectedMediaFile===item.file?"selected":""}" data-media="${escapeHtml(item.file)}">
@@ -153,17 +176,19 @@ function renderTimeline(){
   const {map,total}=timelineLayout(), scale=Number($("#timelineZoom").value); document.documentElement.style.setProperty("--scale",`${scale}px`);
   const width=Math.max(650,total*scale+120); $("#ruler").style.width=`${width}px`; $("#tracks").style.width=`${width+58}px`;
   $("#ruler").innerHTML=Array.from({length:Math.ceil(total)+2},(_,i)=>`<span style="left:${i*scale+3}px">${formatTime(i).slice(3,8)}</span>`).join("");
-  const rows=[{track:2,label:"V3"},{track:1,label:"V2"},{track:0,label:"V1"},{track:"audio",label:"A1"},{track:"voice",label:"VO"}];
+  const rows=[{track:"sticker",label:"S1"},{track:2,label:"V3"},{track:1,label:"V2"},{track:0,label:"V1"},{track:"audio",label:"A1"},{track:"voice",label:"VO"}];
   $("#tracks").innerHTML=rows.map(row=>`<div class="track" data-track="${row.track}"><div class="track-label">${row.label}</div><div class="track-lane">${timelineItems(row.track,map,scale)}</div></div>`).join("");
   $("#playhead").style.left=`${58+playheadTime*scale}px`; $("#playhead").style.height=`${24+rows.length*42}px`;
-  $("#timelineSummary").textContent=`${project.clips.length} clips · ${total.toFixed(1)}s`;
+  $("#timelineSummary").textContent=`${project.clips.length} clips · ${project.stickers.length} stickers · ${total.toFixed(1)}s`;
   requestAnimationFrame(drawWaveforms);
 }
 function timelineItems(track,map,scale){
+  if(track==="sticker")return project.stickers.map(item=>stickerHtml(item,map.get(item.id),scale)).join("");
   if(track==="audio") return primaryClips().filter(clip=>!clip.audioDetached&&mediaByFile(clip.file).hasAudio!==false).map(clip=>linkedAudioHtml(clip,map.get(clip.id),scale)).join("")+project.audioClips.map(audio=>audioClipHtml(audio,map.get(audio.id),scale)).join("")+(project.audio?`<div class="clip audio legacy-audio" style="left:0;width:${Math.max(20,timelineLayout().total*scale)}px"><span class="clip-name">♫ Legacy music · ${escapeHtml(mediaByFile(project.audio).name)}</span></div>`:"");
   if(track==="voice") return project.voiceovers.map(voice=>voiceHtml(voice,map.get(voice.id),scale)).join("");
   return project.clips.filter(clip=>Number(clip.track)===Number(track)).map(clip=>clipHtml(clip,map.get(clip.id),scale,Number(track)>0?"overlay":"")).join("");
 }
+function stickerHtml(sticker,layout,scale){return `<div class="clip sticker ${selectedStickerId===sticker.id?"selected":""}" data-sticker="${sticker.id}" title="Drag to move this sticker; drag either edge to trim" style="left:${layout.start*scale}px;width:${Math.max(20,layout.duration*scale)}px"><span class="trim left"></span><span class="clip-name">${escapeHtml(sticker.emoji||"◆")} ${escapeHtml(sticker.name)}</span><span class="trim right"></span></div>`;}
 function linkedAudioHtml(clip,layout,scale){return `<div class="clip audio linked-audio ${selectedClipId===clip.id&&inspectorTab==="audio"&&!selectedAudioClipId?"selected":""}" data-linked-audio="${clip.id}" title="Linked to ${escapeHtml(clip.name)} — unlink it to edit independently" style="left:${layout.start*scale}px;width:${Math.max(20,layout.duration*scale)}px"><canvas class="waveform" data-waveform="${escapeHtml(clip.file)}"></canvas><span class="clip-name">🔗 ${clip.mute?"Muted · ":""}${escapeHtml(clip.name)}</span></div>`;}
 function audioClipHtml(audio,layout,scale){return `<div class="clip audio ${selectedAudioClipId===audio.id?"selected":""}" data-audio-clip="${audio.id}" title="Drag to move this independent audio clip" style="left:${layout.start*scale}px;width:${Math.max(20,layout.duration*scale)}px"><canvas class="waveform" data-waveform="${escapeHtml(audio.file)}"></canvas><span class="trim left"></span><span class="clip-name">♫ ${audio.mute?"Muted · ":""}${escapeHtml(audio.name)}</span><span class="trim right"></span></div>`;}
 function clipHtml(clip,layout,scale,kind){
@@ -186,8 +211,8 @@ const inputField=(label,prop,value,type="number",attrs="")=>`<div class="field">
 const checkField=(label,prop,value)=>`<label class="check"><input type="checkbox" data-prop="${prop}" ${value?"checked":""}> ${label}</label>`;
 function renderInspector(){
   $$("#inspectorTabs button").forEach(button=>button.classList.toggle("active",button.dataset.tab===inspectorTab));
-  const clip=selectedClip(),audioClip=selectedAudioClip(),voice=selectedVoiceover(),music=highlightedAudio();
-  $("#selectionLabel").textContent=audioClip&&inspectorTab==="audio"?(audioClip.name||"Audio"):voice&&inspectorTab==="audio"?(voice.name||"Voiceover"):clip?clip.name:"Project";
+  const clip=selectedClip(),sticker=selectedSticker(),audioClip=selectedAudioClip(),voice=selectedVoiceover(),music=highlightedAudio(),image=highlightedImage();
+  $("#selectionLabel").textContent=inspectorTab==="stickers"&&sticker?(sticker.emoji||sticker.name||"Sticker"):audioClip&&inspectorTab==="audio"?(audioClip.name||"Audio"):voice&&inspectorTab==="audio"?(voice.name||"Voiceover"):clip?clip.name:"Project";
   const body=$("#inspectorBody");
   const voiceSection=voice?`<div class="section"><h3>Selected voiceover</h3>${rangeField("Voice level","voice.volume",0,4,.01,voice.volume??1,"×")}${inputField("Timeline start","voice.start",voice.start??0,"number",'min="0" step=".01"')}<button data-action="remove-voice" class="danger">Remove selected voiceover</button></div>`:"";
   const musicHint=music?`Highlighted music: <strong>${escapeHtml(music.name)}</strong>`:"Highlight an audio file in Media before replacing.";
@@ -195,6 +220,11 @@ function renderInspector(){
     const linked=project.clips.find(item=>item.id===audioClip.linkedClipId);
     body.innerHTML=`<div class="section"><h3>Independent A1 audio</h3><div class="notice">This audio can move, trim, mute, replace, or delete without changing the video.</div>${rangeField("Level","audio.volume",0,4,.01,audioClip.volume??1,"×")}${checkField("Mute audio","audio.mute",audioClip.mute)}${inputField("Timeline start","audio.start",audioClip.start??0,"number",'min="0" step=".01"')}${inputField("Duration","audio.duration",audioClip.duration??3,"number",'min=".05" step=".01"')}<p class="hint">${musicHint}</p><div class="row"><button data-action="replace-selected-audio" ${music?"":"disabled"}>Replace with highlighted music</button><button data-action="delete-audio" class="danger">Delete audio only</button></div>${linked?'<button data-action="restore-original-audio">Restore original linked audio</button>':""}</div><div class="section"><h3>Voice mix</h3>${checkField("Duck A1 audio under voiceover","project.audioDucking",project.audioDucking)}</div>`;
     body.querySelectorAll("input[data-prop],select[data-prop]").forEach(control=>{control.addEventListener("input",inspectorInput);control.addEventListener("change",inspectorChange)});return;
+  }
+  if(inspectorTab==="stickers"){
+    const selectedControls=sticker?`<div class="section"><h3>Selected sticker</h3><div class="notice">Drag it in the viewer or on S1. Drag its S1 edges to trim when it appears.</div>${inputField("Timeline start","sticker.start",sticker.start,"number",'min="0" step=".01"')}${inputField("Duration","sticker.duration",sticker.duration,"number",'min=".05" step=".01"')}${rangeField("Position X","sticker.x",0,1,.01,sticker.x)}${rangeField("Position Y","sticker.y",0,1,.01,sticker.y)}${rangeField("Scale","sticker.scale",.03,.8,.01,sticker.scale)}${rangeField("Rotation","sticker.rotation",-180,180,1,sticker.rotation,"°")}${rangeField("Opacity","sticker.opacity",0,1,.01,sticker.opacity)}<button data-action="delete-sticker" class="danger">Delete sticker</button></div>`:'<div class="empty">Add an emoji or image sticker, or select one on S1.</div>';
+    body.innerHTML=`<div class="section"><h3>Emoji stickers</h3><div class="emoji-grid">${["😀","😂","❤️","👍","🔥","⭐","🎉","😎","💡","✅","🚀","💬"].map(value=>`<button data-emoji="${value}" title="Add ${value}">${value}</button>`).join("")}</div><p class="hint">Emoji use the native color emoji artwork on this computer and are saved as portable transparent PNG files.</p></div><div class="section"><h3>Image sticker</h3><p class="hint">${image?`Highlighted image: <strong>${escapeHtml(image.name)}</strong>`:"Highlight a PNG, JPEG or WebP image in Media."}</p><button data-action="add-image-sticker" ${image?"":"disabled"}>Add highlighted image to S1</button></div>${selectedControls}`;
+    body.querySelectorAll("input[data-prop],select[data-prop]").forEach(control=>{control.addEventListener("input",inspectorInput);control.addEventListener("change",inspectorChange)});applyPreviewEffects();return;
   }
   if(inspectorTab!=="project"&&!clip){if(inspectorTab==="audio"&&voice){body.innerHTML=voiceSection;body.querySelectorAll("input[data-prop],select[data-prop]").forEach(control=>{control.addEventListener("input",inspectorInput);control.addEventListener("change",inspectorChange)});return}body.innerHTML='<div class="empty">Select a timeline clip</div>';return;}
   if(inspectorTab==="clip") body.innerHTML=`<div class="section"><h3>Timing</h3>${inputField("Source in","start",clip.start,"number",'min="0" step=".01"')}${inputField("Source out","end",clip.end,"number",'min=".05" step=".01"')}${clip.kind==="freeze"?inputField("Still duration","duration",clip.duration||3,"number",'min=".1" step=".1"'):""}${rangeField("Speed","speed",.25,4,.05,clip.speed,"×")}${checkField("Reverse clip","reverse",clip.reverse)}</div><div class="section"><h3>Track & transition</h3><div class="field"><label>Video track</label><select data-prop="track"><option value="0" ${clip.track==0?"selected":""}>V1 · primary</option><option value="1" ${clip.track==1?"selected":""}>V2 · overlay</option><option value="2" ${clip.track==2?"selected":""}>V3 · overlay</option></select></div>${Number(clip.track)>0?inputField("Timeline start","timelineStart",clip.timelineStart,"number",'min="0" step=".01"'):""}<div class="field"><label>Transition in</label><select data-prop="transition">${["none","dissolve","fade","wipe","slide","zoom"].map(v=>`<option ${clip.transition===v?"selected":""}>${v}</option>`).join("")}</select></div>${rangeField("Transition","transitionDuration",.04,3,.01,clip.transitionDuration,"s")}</div>`;
@@ -225,6 +255,7 @@ function inspectorInput(event){
   if(path.startsWith("project."))setNested(project,path.slice(8),value);
   else if(path.startsWith("voice.")){const voice=selectedVoiceover();if(voice)setNested(voice,path.slice(6),value);}
   else if(path.startsWith("audio.")){const audio=selectedAudioClip();if(audio)setNested(audio,path.slice(6),value);}
+  else if(path.startsWith("sticker.")){const sticker=selectedSticker();if(sticker)setNested(sticker,path.slice(8),value);}
   else setNested(selectedClip(),path,value);
   const clip=selectedClip();if(clip&&path.startsWith("crop.")){clip.crop.x=clamp(clip.crop.x,0,.95);clip.crop.y=clamp(clip.crop.y,0,.95);clip.crop.w=clamp(clip.crop.w,.05,1-clip.crop.x);clip.crop.h=clamp(clip.crop.h,.05,1-clip.crop.y);}
   const output=control.nextElementSibling;if(output?.tagName==="OUTPUT")output.textContent=`${Number(value).toFixed(Number(control.step)<1?2:0)}${output.textContent.replace(/[-\d.]/g,"")}`;
@@ -245,6 +276,14 @@ function previewFilterCss(id,intensity){
   if(id==="soft")return ` contrast(${1-.12*i}) saturate(${1-.08*i}) brightness(${1+.06*i})`;
   if(id==="teal_orange")return ` sepia(${.18*i}) hue-rotate(${150*i}deg) saturate(${1+.24*i}) contrast(${1+.08*i})`;
   return "";
+}
+
+function renderStickerPreview(){
+  const layer=$("#stickerLayer");if(!layer)return;
+  layer.innerHTML=project.stickers.filter(sticker=>playheadTime>=Number(sticker.start||0)&&playheadTime<Number(sticker.start||0)+Math.max(.05,Number(sticker.duration)||.05)).map(sticker=>{
+    const item=mediaByFile(sticker.file);
+    return `<img class="sticker-preview ${selectedStickerId===sticker.id?"selected":""}" data-preview-sticker="${sticker.id}" src="${escapeHtml(item.url)}" alt="${escapeHtml(sticker.name)}" draggable="false" style="left:${clamp(sticker.x,0,1)*100}%;top:${clamp(sticker.y,0,1)*100}%;width:${clamp(sticker.scale,.03,.8)*100}%;opacity:${clamp(sticker.opacity,0,1)};transform:translate(-50%,-50%) rotate(${clamp(sticker.rotation,-180,180)}deg)">`;
+  }).join("");
 }
 
 function applyPreviewEffects(){
@@ -268,6 +307,7 @@ function applyPreviewEffects(){
   $("#safeArea").style.display=project.safeArea?"block":"none"; stage.className=`stage ratio-${project.ratio.replace(":","-")}`;
   const wm=$("#imageWatermark"),conf=project.imageWatermark,item=mediaByFile(conf.file);wm.style.display=conf.file?"block":"none";if(conf.file)wm.src=item.url;Object.assign(wm.style,{width:`${conf.scale*100}%`,opacity:conf.opacity,left:`${conf.x*100}%`,top:`${conf.y*100}%`});
   const mask=$("#maskPreview"),maskToggle=$("#showMask");mask.style.display=maskToggle?.checked&&clip?.tracking?.maskUrl?"block":"none";if(clip?.tracking?.maskUrl)mask.src=clip.tracking.maskUrl;
+  renderStickerPreview();
 }
 function renderAll(){
   $("#projectName").value=project.name;renderLibrary();renderTimeline();renderInspector();loadSelectedPreview(false);updateTimecode();syncTimelineAudioPreview(playheadTime,isPlayingTimeline);
@@ -283,7 +323,7 @@ function seekTimeline(time){
   const {map,total}=timelineLayout();playheadTime=clamp(time,0,total);let target=project.clips.find(clip=>{const item=map.get(clip.id);return item&&playheadTime>=item.start&&playheadTime<item.start+item.duration});
   if(!target)target=primaryClips().at(-1)||project.clips.at(-1);if(target&&target.id!==selectedClipId){selectedClipId=target.id;renderInspector();loadSelectedPreview(false)}
   if(target&&target.kind!=="freeze"){const item=map.get(target.id);preview.currentTime=Number(target.start)+(playheadTime-item.start)*Number(target.speed||1)}
-  renderTimeline();updateTimecode();syncTimelineAudioPreview(playheadTime,isPlayingTimeline);
+  renderTimeline();updateTimecode();applyPreviewEffects();syncTimelineAudioPreview(playheadTime,isPlayingTimeline);
 }
 function updateTimecode(){const total=timelineLayout().total;$("#timecode").textContent=`${formatTime(playheadTime)} / ${formatTime(total)}`;}
 function setupAudio(){if(audioContext)return;const Context=window.AudioContext||window.webkitAudioContext;if(!Context)return;audioContext=new Context();previewSource=audioContext.createMediaElementSource(preview);previewGain=audioContext.createGain();previewSource.connect(previewGain).connect(audioContext.destination);applyPreviewEffects();}
@@ -339,7 +379,7 @@ function playTick(){
   if(!isPlayingTimeline)return;const clip=selectedClip(),layout=clip&&timelineLayout().map.get(clip.id);if(!clip||!layout){isPlayingTimeline=false;stopTimelineAudioPreview();return}
   if(clip.kind!=="freeze")playheadTime=layout.start+(preview.currentTime-clip.start)/clip.speed;else playheadTime+=1/60;
   if(playheadTime>=layout.start+layout.duration-.02){const map=timelineLayout().map,all=primaryClips().map(item=>[item.id,map.get(item.id)]).filter(([,item])=>item).sort((a,b)=>a[1].start-b[1].start),next=all.find(([,item])=>item.start>layout.start+.001);if(next){selectedClipId=next[0];selectedVoiceoverId="";playheadTime=next[1].start;renderInspector();loadSelectedPreview(true);const nc=selectedClip();if(nc?.kind!=="freeze"){preview.playbackRate=nc.speed;preview.play().catch(()=>{})}}else{isPlayingTimeline=false;$("#playButton").textContent="▶";}}
-  syncTimelineAudioPreview(playheadTime,isPlayingTimeline);renderTimeline();updateTimecode();if(isPlayingTimeline)requestAnimationFrame(playTick);
+  syncTimelineAudioPreview(playheadTime,isPlayingTimeline);renderTimeline();updateTimecode();applyPreviewEffects();if(isPlayingTimeline)requestAnimationFrame(playTick);
 }
 
 function movePrimaryClip(clip,offset){
@@ -381,12 +421,15 @@ function restoreOriginalAudio(){
 }
 
 function action(name){
-  const clip=selectedClip(),audioClip=selectedAudioClip(),layout=clip&&timelineLayout().map.get(clip.id);
+  const clip=selectedClip(),sticker=selectedSticker(),audioClip=selectedAudioClip(),layout=clip&&timelineLayout().map.get(clip.id);
   if(name==="import")return $("#mediaFiles").click();
-  if(name==="new"){if(!confirm("Start a new project? The current project will be kept as the previous recovery snapshot."))return;const current=localStorage.getItem("vdodesk.autosave")||JSON.stringify({project,media,at:Date.now()});localStorage.setItem("vdodesk.recovery.previous",current);history=[];future=[];project=freshProject();selectedClipId="";selectedAudioClipId="";selectedVoiceoverId="";snapshot(false);renderAll();return}
+  if(name==="new"){if(!confirm("Start a new project? The current project will be kept as the previous recovery snapshot."))return;const current=localStorage.getItem("vdodesk.autosave")||JSON.stringify({project,media,at:Date.now()});localStorage.setItem("vdodesk.recovery.previous",current);history=[];future=[];project=freshProject();selectedClipId="";selectedStickerId="";selectedAudioClipId="";selectedVoiceoverId="";snapshot(false);renderAll();return}
   if(name==="save")return saveProject(); if(name==="open")return $("#projectFile").click(); if(name==="export")return openExportDialog(); if(name==="preview")return startRender(true);
   if(name==="undo"&&history.length){future.push(JSON.stringify(project));restore(history.pop());snapshot(false);return}if(name==="redo"&&future.length){history.push(JSON.stringify(project));restore(future.pop());snapshot(false);return}
   if(name==="play")return togglePlay();if(name==="timeline-start")return seekTimeline(0);if(name==="timeline-end")return seekTimeline(timelineLayout().total-1/project.fps);if(name==="clip-start"&&layout)return seekTimeline(layout.start);if(name==="clip-end"&&layout)return seekTimeline(layout.start+layout.duration-1/project.fps);if(name==="step-back")return seekTimeline(playheadTime-1/project.fps);if(name==="step-forward")return seekTimeline(playheadTime+1/project.fps);
+  if(name==="add-image-sticker")return addStickerFromMedia(highlightedImage());
+  if(name==="delete-sticker"&&sticker){pushChange(()=>{project.stickers=project.stickers.filter(item=>item.id!==sticker.id);selectedStickerId=""});toast("Sticker deleted");return}
+  if(name==="delete"&&sticker&&inspectorTab==="stickers")return action("delete-sticker");
   if(name==="delete"&&audioClip)return action("delete-audio");
   if(name==="delete"&&clip)return pushChange(()=>{project.clips=project.clips.filter(c=>c.id!==clip.id);selectedClipId=project.clips[0]?.id||""});
   if(name==="duplicate"&&clip)return pushChange(()=>{const copy=structuredClone(clip);copy.id=uid();copy.name+=" copy";if(copy.track>0)copy.timelineStart+=.25;project.clips.splice(project.clips.indexOf(clip)+1,0,copy);selectedClipId=copy.id});
@@ -424,18 +467,20 @@ document.addEventListener("click",event=>{
   if(suppressTimelineClick){suppressTimelineClick=false;event.preventDefault();return}
   const actionNode=event.target.closest("[data-action]");if(actionNode){event.preventDefault();action(actionNode.dataset.action);return}
   const filterNode=event.target.closest("[data-filter]");if(filterNode){event.preventDefault();const clip=selectedClip();if(clip)pushChange(()=>{clip.filter=filterNode.dataset.filter;clip.filterIntensity=clip.filterIntensity??1});return}
+  const emojiNode=event.target.closest("[data-emoji]");if(emojiNode){event.preventDefault();addEmojiSticker(emojiNode.dataset.emoji);return}
   const add=event.target.closest("[data-add]");if(add){event.stopPropagation();addMediaToTimeline(mediaByFile(add.dataset.add));return}
   const card=event.target.closest("[data-media]");if(card){selectedMediaFile=card.dataset.media;renderLibrary();renderInspector();return}
-  const audioNode=event.target.closest("[data-audio-clip]");if(audioNode){selectedAudioClipId=audioNode.dataset.audioClip;selectedVoiceoverId="";inspectorTab="audio";playheadTime=Number(selectedAudioClip()?.start)||0;renderTimeline();renderInspector();updateTimecode();return}
-  const linkedAudioNode=event.target.closest("[data-linked-audio]");if(linkedAudioNode){selectedClipId=linkedAudioNode.dataset.linkedAudio;selectedAudioClipId="";selectedVoiceoverId="";inspectorTab="audio";const item=timelineLayout().map.get(selectedClipId);playheadTime=item?.start||0;renderTimeline();renderInspector();updateTimecode();return}
-  const voiceNode=event.target.closest("[data-voice]");if(voiceNode){selectedAudioClipId="";selectedVoiceoverId=voiceNode.dataset.voice;inspectorTab="audio";playheadTime=Number(selectedVoiceover()?.start)||0;renderTimeline();renderInspector();updateTimecode();return}
-  const clipNode=event.target.closest("[data-clip]");if(clipNode){selectedClipId=clipNode.dataset.clip;selectedAudioClipId="";selectedVoiceoverId="";const item=timelineLayout().map.get(selectedClipId);seekTimeline(item.start);renderAll();return}
+  const stickerNode=event.target.closest("[data-sticker]");if(stickerNode){selectedStickerId=stickerNode.dataset.sticker;selectedAudioClipId="";selectedVoiceoverId="";inspectorTab="stickers";playheadTime=Number(selectedSticker()?.start)||0;renderTimeline();renderInspector();updateTimecode();applyPreviewEffects();return}
+  const audioNode=event.target.closest("[data-audio-clip]");if(audioNode){selectedStickerId="";selectedAudioClipId=audioNode.dataset.audioClip;selectedVoiceoverId="";inspectorTab="audio";playheadTime=Number(selectedAudioClip()?.start)||0;renderTimeline();renderInspector();updateTimecode();return}
+  const linkedAudioNode=event.target.closest("[data-linked-audio]");if(linkedAudioNode){selectedStickerId="";selectedClipId=linkedAudioNode.dataset.linkedAudio;selectedAudioClipId="";selectedVoiceoverId="";inspectorTab="audio";const item=timelineLayout().map.get(selectedClipId);playheadTime=item?.start||0;renderTimeline();renderInspector();updateTimecode();return}
+  const voiceNode=event.target.closest("[data-voice]");if(voiceNode){selectedStickerId="";selectedAudioClipId="";selectedVoiceoverId=voiceNode.dataset.voice;inspectorTab="audio";playheadTime=Number(selectedVoiceover()?.start)||0;renderTimeline();renderInspector();updateTimecode();return}
+  const clipNode=event.target.closest("[data-clip]");if(clipNode){selectedStickerId="";selectedClipId=clipNode.dataset.clip;selectedAudioClipId="";selectedVoiceoverId="";const item=timelineLayout().map.get(selectedClipId);seekTimeline(item.start);renderAll();return}
 });
 $("#inspectorTabs").addEventListener("click",event=>{const button=event.target.closest("[data-tab]");if(button){inspectorTab=button.dataset.tab;renderInspector()}});
 $$('[data-library]').forEach(button=>button.addEventListener("click",()=>{libraryView=button.dataset.library;$$('[data-library]').forEach(b=>b.classList.toggle("active",b===button));renderLibrary()}));
 $("#mediaFiles").addEventListener("change",event=>importFiles(event.target.files));
 $("#projectFile").addEventListener("change",async event=>{try{restore(await event.target.files[0].text());snapshot(false);toast("Project opened") }catch(error){toast(`Invalid project: ${error.message}`)}});
-$("#relinkFile").addEventListener("change",async event=>{try{const old=selectedMediaFile,item=await uploadFile(event.target.files[0]);snapshot(true);project.clips.filter(c=>c.file===old).forEach(c=>{c.file=item.file;c.name=item.name});project.audioClips.filter(c=>c.file===old).forEach(c=>{c.file=item.file;c.name=item.name});project.voiceovers.filter(c=>c.file===old).forEach(c=>c.file=item.file);if(project.audio===old)project.audio=item.file;if(project.imageWatermark.file===old)project.imageWatermark.file=item.file;selectedMediaFile=item.file;renderAll();toast("All project references relinked")}catch(error){toast(error.message)}});
+$("#relinkFile").addEventListener("change",async event=>{try{const old=selectedMediaFile,item=await uploadFile(event.target.files[0]);snapshot(true);project.clips.filter(c=>c.file===old).forEach(c=>{c.file=item.file;c.name=item.name});project.stickers.filter(c=>c.file===old).forEach(c=>{c.file=item.file;c.name=item.name});project.audioClips.filter(c=>c.file===old).forEach(c=>{c.file=item.file;c.name=item.name});project.voiceovers.filter(c=>c.file===old).forEach(c=>c.file=item.file);if(project.audio===old)project.audio=item.file;if(project.imageWatermark.file===old)project.imageWatermark.file=item.file;selectedMediaFile=item.file;renderAll();toast("All project references relinked")}catch(error){toast(error.message)}});
 $("#projectName").addEventListener("input",event=>{project.name=event.target.value;snapshot(false)});
 $("#timelineZoom").addEventListener("input",renderTimeline);$("#proxyToggle").addEventListener("change",()=>loadSelectedPreview(false));
 $("#inspectorBody").addEventListener("change",event=>{if(event.target.matches("[data-project]")){rememberUndoState();const value=event.target.type==="checkbox"?event.target.checked:event.target.dataset.project==="fps"?Number(event.target.value):event.target.value;setNested(project,event.target.dataset.project,value);snapshot(false);renderAll()}if(event.target.id==="showMask")applyPreviewEffects()});
@@ -458,6 +503,7 @@ function videoTrackAtPoint(x,y){
   return track&&["0","1","2"].includes(track.dataset.track)?track:null;
 }
 function audioTrackAtPoint(x,y){const track=document.elementFromPoint(x,y)?.closest('[data-track="audio"]');return track||null;}
+function stickerTrackAtPoint(x,y){const track=document.elementFromPoint(x,y)?.closest('[data-track="sticker"]');return track||null;}
 function timelineTimeAtPoint(x,track){
   const lane=track.querySelector(".track-lane").getBoundingClientRect();
   return Math.max(0,(x-lane.left)/Number($("#timelineZoom").value));
@@ -495,15 +541,23 @@ function showTimelineDropUI(event,target){
   marker.style.left=`${Math.max(0,Math.min(rect.width,event.clientX-rect.left))}px`;
 }
 function restoreDraggedClip(){
-  const clip=dragState.clip||dragState.audioClip,original=dragState.original;
+  const clip=dragState.clip||dragState.audioClip||dragState.sticker,original=dragState.original;
   Object.keys(clip).forEach(key=>delete clip[key]);Object.assign(clip,structuredClone(original));
 }
 tracks.addEventListener("pointerdown",event=>{
+  const stickerNode=event.target.closest("[data-sticker]");
+  if(stickerNode){
+    const sticker=project.stickers.find(item=>item.id===stickerNode.dataset.sticker);if(!sticker)return;
+    const side=event.target.classList.contains("left")?"left":event.target.classList.contains("right")?"right":"move",trackNode=stickerNode.closest("[data-track]"),layout=timelineLayout().map.get(sticker.id),pointerTime=timelineTimeAtPoint(event.clientX,trackNode);
+    selectedStickerId=sticker.id;selectedAudioClipId="";selectedVoiceoverId="";inspectorTab="stickers";
+    dragState={sticker,node:stickerNode,startX:event.clientX,startY:event.clientY,original:structuredClone(sticker),beforeProject:JSON.stringify(project),side,pointerId:event.pointerId,moved:false,changed:false,grabOffset:Math.max(0,pointerTime-(layout?.start||0))};
+    tracks.setPointerCapture(event.pointerId);if(side==="move")stickerNode.classList.add("dragging");event.preventDefault();return;
+  }
   const audioNode=event.target.closest("[data-audio-clip]");
   if(audioNode){
     const audioClip=project.audioClips.find(item=>item.id===audioNode.dataset.audioClip);if(!audioClip)return;
     const side=event.target.classList.contains("left")?"left":event.target.classList.contains("right")?"right":"move",trackNode=audioNode.closest("[data-track]"),layout=timelineLayout().map.get(audioClip.id),pointerTime=timelineTimeAtPoint(event.clientX,trackNode);
-    selectedAudioClipId=audioClip.id;selectedVoiceoverId="";inspectorTab="audio";
+    selectedStickerId="";selectedAudioClipId=audioClip.id;selectedVoiceoverId="";inspectorTab="audio";
     dragState={audioClip,node:audioNode,startX:event.clientX,startY:event.clientY,original:structuredClone(audioClip),beforeProject:JSON.stringify(project),side,pointerId:event.pointerId,moved:false,changed:false,grabOffset:Math.max(0,pointerTime-(layout?.start||0))};
     tracks.setPointerCapture(event.pointerId);if(side==="move")audioNode.classList.add("dragging");event.preventDefault();return;
   }
@@ -514,7 +568,7 @@ tracks.addEventListener("pointerdown",event=>{
   const side=event.target.classList.contains("left")?"left":event.target.classList.contains("right")?"right":"move";
   const layout=timelineLayout().map.get(clip.id),sourceTrackNode=clipNode.closest("[data-track]");
   const pointerTime=timelineTimeAtPoint(event.clientX,sourceTrackNode);
-  selectedClipId=clip.id;selectedAudioClipId="";selectedVoiceoverId="";
+  selectedStickerId="";selectedClipId=clip.id;selectedAudioClipId="";selectedVoiceoverId="";
   dragState={clip,node:clipNode,startX:event.clientX,startY:event.clientY,original:structuredClone(clip),
     beforeProject:JSON.stringify(project),side,pointerId:event.pointerId,moved:false,changed:false,
     grabOffset:Math.max(0,pointerTime-(layout?.start||0))};
@@ -523,8 +577,19 @@ tracks.addEventListener("pointerdown",event=>{
 });
 tracks.addEventListener("pointermove",event=>{
   if(!dragState)return;
-  const pixelDelta=event.clientX-dragState.startX,delta=pixelDelta/Number($("#timelineZoom").value),{clip,audioClip,original,side}=dragState;
+  const pixelDelta=event.clientX-dragState.startX,delta=pixelDelta/Number($("#timelineZoom").value),{clip,sticker,audioClip,original,side}=dragState;
   if(Math.hypot(pixelDelta,event.clientY-dragState.startY)>3)dragState.moved=true;
+  if(sticker){
+    if(side!=="move"){
+      if(Math.abs(pixelDelta)<1)return;beginTimelineChange();
+      if(side==="left"){
+        const applied=clamp(delta,-Number(original.start||0),Number(original.duration)-.05);sticker.start=Number(original.start)+applied;sticker.duration=Math.max(.05,Number(original.duration)-applied);
+      }else sticker.duration=Math.max(.05,Number(original.duration)+delta);
+      renderTimeline();applyPreviewEffects();return;
+    }
+    const bounds=timelineScroll.getBoundingClientRect();if(event.clientX<bounds.left+45)timelineScroll.scrollLeft=Math.max(0,timelineScroll.scrollLeft-14);else if(event.clientX>bounds.right-45)timelineScroll.scrollLeft+=14;
+    dragState.node.style.transform=`translate(${pixelDelta}px,${event.clientY-dragState.startY}px)`;const target=stickerTrackAtPoint(event.clientX,event.clientY);if(target)showTimelineDropUI(event,target);else clearTimelineDropTarget();event.preventDefault();return;
+  }
   if(audioClip){
     if(side!=="move"){
       if(Math.abs(pixelDelta)<1)return;beginTimelineChange();
@@ -553,9 +618,13 @@ tracks.addEventListener("pointermove",event=>{
 });
 function finishTimelineDrag(event,cancelled=false){
   if(!dragState)return;
-  const state=dragState,target=!cancelled&&state.side==="move"?(state.audioClip?audioTrackAtPoint(event.clientX,event.clientY):videoTrackAtPoint(event.clientX,event.clientY)):null;
+  const state=dragState,target=!cancelled&&state.side==="move"?(state.sticker?stickerTrackAtPoint(event.clientX,event.clientY):state.audioClip?audioTrackAtPoint(event.clientX,event.clientY):videoTrackAtPoint(event.clientX,event.clientY)):null;
   clearTimelineDropUI();
   if(cancelled){if(state.changed)restoreDraggedClip()}
+  else if(state.sticker&&state.side==="move"&&state.moved&&target){
+    const dropTime=timelineTimeAtPoint(event.clientX,target),newStart=Math.round(Math.max(0,dropTime-state.grabOffset)*project.fps)/project.fps;
+    if(Math.abs(newStart-Number(state.sticker.start||0))>.0001){beginTimelineChange();state.sticker.start=newStart}
+  }
   else if(state.audioClip&&state.side==="move"&&state.moved&&target){
     const dropTime=timelineTimeAtPoint(event.clientX,target),newStart=Math.round(Math.max(0,dropTime-state.grabOffset)*project.fps)/project.fps;
     if(Math.abs(newStart-Number(state.audioClip.start||0))>.0001){beginTimelineChange();state.audioClip.start=newStart}
@@ -576,17 +645,32 @@ function finishTimelineDrag(event,cancelled=false){
   const changed=state.changed,moved=state.moved;dragState=null;
   if(changed)snapshot(false);renderAll();
   if(moved){suppressTimelineClick=true;setTimeout(()=>{suppressTimelineClick=false},0)}
-  if(changed&&state.side==="move")toast(state.audioClip?"Audio moved on A1":Number(state.clip.track)===0?"Clip reordered on V1":"Clip moved on timeline");
+  if(changed&&state.side==="move")toast(state.sticker?"Sticker moved on S1":state.audioClip?"Audio moved on A1":Number(state.clip.track)===0?"Clip reordered on V1":"Clip moved on timeline");
 }
 tracks.addEventListener("pointerup",event=>finishTimelineDrag(event));
 tracks.addEventListener("pointercancel",event=>finishTimelineDrag(event,true));
 
 const dropZone=$("#dropZone");["dragenter","dragover"].forEach(type=>dropZone.addEventListener(type,event=>{event.preventDefault();dropZone.classList.add("drag")}));["dragleave","drop"].forEach(type=>dropZone.addEventListener(type,event=>{event.preventDefault();dropZone.classList.remove("drag")}));dropZone.addEventListener("drop",event=>importFiles(event.dataTransfer.files));
+let stickerViewerDrag=null;const stickerLayer=$("#stickerLayer");
+stickerLayer.addEventListener("pointerdown",event=>{
+  const node=event.target.closest("[data-preview-sticker]");if(!node)return;const sticker=project.stickers.find(item=>item.id===node.dataset.previewSticker);if(!sticker)return;
+  selectedStickerId=sticker.id;selectedAudioClipId="";selectedVoiceoverId="";inspectorTab="stickers";stickerViewerDrag={sticker,node,pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,original:structuredClone(sticker),beforeProject:JSON.stringify(project),changed:false};
+  $$(".sticker-preview.selected").forEach(item=>item.classList.remove("selected"));node.classList.add("selected");node.setPointerCapture(event.pointerId);event.preventDefault();
+});
+stickerLayer.addEventListener("pointermove",event=>{
+  if(!stickerViewerDrag)return;const rect=stage.getBoundingClientRect(),state=stickerViewerDrag;
+  if(!state.changed&&Math.hypot(event.clientX-state.startX,event.clientY-state.startY)>2){history.push(state.beforeProject);if(history.length>60)history.shift();future=[];state.changed=true}
+  if(!state.changed)return;state.sticker.x=clamp((event.clientX-rect.left)/rect.width,0,1);state.sticker.y=clamp((event.clientY-rect.top)/rect.height,0,1);state.node.style.left=`${state.sticker.x*100}%`;state.node.style.top=`${state.sticker.y*100}%`;event.preventDefault();
+});
+function finishStickerViewerDrag(cancelled=false){
+  if(!stickerViewerDrag)return;const state=stickerViewerDrag;if(cancelled&&state.changed)Object.assign(state.sticker,state.original);if(state.node.hasPointerCapture(state.pointerId))state.node.releasePointerCapture(state.pointerId);stickerViewerDrag=null;if(state.changed)snapshot(false);renderTimeline();renderInspector();applyPreviewEffects();if(state.changed&&!cancelled)toast("Sticker position updated");
+}
+stickerLayer.addEventListener("pointerup",()=>finishStickerViewerDrag(false));stickerLayer.addEventListener("pointercancel",()=>finishStickerViewerDrag(true));
 let watermarkDrag=null;$("#imageWatermark").addEventListener("pointerdown",event=>{watermarkDrag={x:event.clientX,y:event.clientY,ox:project.imageWatermark.x,oy:project.imageWatermark.y};event.target.setPointerCapture(event.pointerId)});$("#imageWatermark").addEventListener("pointermove",event=>{if(!watermarkDrag)return;const rect=stage.getBoundingClientRect();project.imageWatermark.x=clamp(watermarkDrag.ox+(event.clientX-watermarkDrag.x)/rect.width,0,1-project.imageWatermark.scale);project.imageWatermark.y=clamp(watermarkDrag.oy+(event.clientY-watermarkDrag.y)/rect.height,0,1-project.imageWatermark.scale);applyPreviewEffects()});$("#imageWatermark").addEventListener("pointerup",()=>{if(watermarkDrag)snapshot(false);watermarkDrag=null;renderInspector()});
 document.addEventListener("keydown",event=>{if(["INPUT","SELECT","TEXTAREA"].includes(event.target.tagName))return;const actions={" ":"play",ArrowLeft:"step-back",ArrowRight:"step-forward",Home:"timeline-start",End:"timeline-end","[":"clip-start","]":"clip-end",Delete:"delete",Backspace:"delete"};if(actions[event.key]){event.preventDefault();action(actions[event.key])}if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="z"){event.preventDefault();action(event.shiftKey?"redo":"undo")}});
 
 async function initialize(){
-  const autosave=localStorage.getItem("vdodesk.autosave");if(autosave){try{const saved=JSON.parse(autosave);project={...freshProject(),...(saved.project||{})};media=saved.media||[];}catch{}}
+  const autosave=localStorage.getItem("vdodesk.autosave");if(autosave){try{const saved=JSON.parse(autosave);project={...freshProject(),...(saved.project||{})};project.stickers=(project.stickers||[]).map(item=>({...defaultSticker({file:item.file,name:item.name||item.file},item.start,item.duration,item.emoji),...item}));media=saved.media||[];}catch{}}
   try{const status=await api("/api/status");$("#version").textContent=`${status.version} · local`;const caps=status.capabilities||{};$("#capabilities").textContent=`Available: ${caps.h264VideoToolbox?"Apple VideoToolbox H.264/HEVC":"software H.264/H.265"}${caps.vp9?", VP9":""}${status.opencv?` · OpenCV ${status.opencv}`:" · manual tracking fallback"}`;}catch(error){toast(error.message)}
   try{await refreshWorkspaceMedia();}catch(error){toast(error.message)}
   await refreshRecent();renderAll();

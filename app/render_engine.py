@@ -613,6 +613,7 @@ def finish_project(base, spec, media, output, temp, total_duration, text_filters
     title = str(spec.get("title") or "").strip()
     text_watermark = str(spec.get("watermark") or "").strip()
     frame_width, frame_height = output_dimensions(spec)
+    fps = int(number(spec.get("fps"), 12, 120, 30))
     builtin_text = not text_filters.get("drawtext") and not (
         text_filters.get("ass") or text_filters.get("subtitles"))
     command = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(base)]
@@ -623,6 +624,16 @@ def finish_project(base, spec, media, output, temp, total_duration, text_filters
     if watermark_name and (media / watermark_name).is_file():
         watermark_index = input_index; input_index += 1
         command += ["-loop", "1", "-i", str(media / watermark_name)]
+    stickers = []
+    for sticker in spec.get("stickers") or []:
+        name = safe_name(sticker.get("file"))
+        source = media / name
+        if not name or not source.is_file():
+            if name:
+                warnings.append(f"Skipped missing sticker: {name}.")
+            continue
+        stickers.append((input_index, sticker));input_index += 1
+        command += ["-loop", "1", "-framerate", str(fps), "-i", str(source)]
     music_index = None
     music_name = safe_name(spec.get("audio"))
     if music_name and (media / music_name).is_file():
@@ -659,14 +670,14 @@ def finish_project(base, spec, media, output, temp, total_duration, text_filters
             box_opacity=.4, bold=True,
         )
         title_image_index = input_index;input_index += 1
-        command += ["-loop", "1", "-framerate", str(int(number(spec.get("fps"), 12, 120, 30))), "-i", str(title_image)]
+        command += ["-loop", "1", "-framerate", str(fps), "-i", str(title_image)]
     if builtin_text and text_watermark:
         watermark_image, _, _ = render_text_png(
             temp / "text-watermark.png", text_watermark, frame_height / 28, frame_width * .55,
             opacity=number(spec.get("watermarkOpacity"), 0, 1, .55),
         )
         watermark_text_index = input_index;input_index += 1
-        command += ["-loop", "1", "-framerate", str(int(number(spec.get("fps"), 12, 120, 30))), "-i", str(watermark_image)]
+        command += ["-loop", "1", "-framerate", str(fps), "-i", str(watermark_image)]
 
     graph = ["[0:v]null[v0]", "[0:a]anull[a0]"]
     video_label = "v0"
@@ -724,6 +735,29 @@ def finish_project(base, spec, media, output, temp, total_duration, text_filters
         graph.append(f"[{watermark_index}:v]scale={max(2, int(frame_width * scale))}:-1,format=rgba,colorchannelmixer=aa={opacity:.6f}[wm]")
         graph.append(f"[{video_label}][wm]overlay=x=(main_w-overlay_w)*{x:.6f}:y=(main_h-overlay_h)*{y:.6f}:shortest=1[vwm]")
         video_label = "vwm"
+    for number_index, (source_index, sticker) in enumerate(stickers):
+        start = number(sticker.get("start"), 0, total_duration, 0)
+        duration = min(number(sticker.get("duration"), .05, 86400, 3),
+                       max(.05, total_duration - start))
+        end = start + duration
+        scale = number(sticker.get("scale"), .03, .8, .18)
+        opacity = number(sticker.get("opacity"), 0, 1, 1)
+        x = number(sticker.get("x"), 0, 1, .5)
+        y = number(sticker.get("y"), 0, 1, .5)
+        rotation = math.radians(number(sticker.get("rotation"), -180, 180, 0))
+        sticker_label = f"sticker{number_index}"
+        filters = [f"scale={max(2, int(frame_width * scale))}:-1", "format=rgba",
+                   f"colorchannelmixer=aa={opacity:.6f}"]
+        if abs(rotation) > .000001:
+            filters.append(f"rotate={rotation:.9f}:ow='rotw(iw)':oh='roth(ih)':fillcolor=black@0")
+        graph.append(f"[{source_index}:v]{','.join(filters)}[{sticker_label}]")
+        output_label = f"vsticker{number_index}"
+        graph.append(
+            f"[{video_label}][{sticker_label}]overlay="
+            f"x='main_w*{x:.6f}-overlay_w/2':y='main_h*{y:.6f}-overlay_h/2':"
+            f"enable='between(t,{start:.6f},{end:.6f})':eof_action=pass[{output_label}]"
+        )
+        video_label = output_label
 
     audio_label = "a0"
     if music_index is not None:
@@ -802,6 +836,8 @@ def render_project(job, spec, media: Path, output_dir: Path, status_callback):
         raise ValueError("Add at least one video clip")
     if len(clips) > 120:
         raise ValueError("Maximum 120 clips per render")
+    if len(spec.get("stickers") or []) > 120:
+        raise ValueError("Maximum 120 stickers per render")
     width, height = output_dimensions(spec)
     fps = int(number(spec.get("fps"), 12, 120, 30))
     temp = output_dir / f"temp-{job}"

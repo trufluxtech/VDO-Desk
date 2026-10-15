@@ -1,4 +1,4 @@
-# VDODesk 1.3.0 beta 1
+# VDODesk 1.4.0 beta 1
 
 <img src="assets/vdodesk-logo.png" alt="VDODesk logo" width="96">
 
@@ -29,6 +29,7 @@ For automatic subject detection, multi-sample tracking, and segmentation masks, 
 - Crop, overlay positioning/scaling, rotation, zoom, mirror, opacity, stabilization and focal-point controls.
 - Brightness, contrast, saturation, gamma, temperature, tint, hue, shadows/highlights and `.cube` 3D LUT support.
 - Ten selected-clip filter presets with adjustable intensity: None, Cinematic, Warm, Cool, Vintage, Mono, Noir, Vivid, Soft and Teal & Orange. Filters affect the live preview, preview renders and exports.
+- A dedicated S1 sticker layer with built-in emoji, imported PNG/JPEG/WebP stickers, timeline drag and edge trim, viewer drag placement, scale, rotation, opacity, project persistence and final FFmpeg compositing. Emoji are converted to portable transparent PNG assets with the computer's native color emoji artwork.
 - Linear end keyframes for zoom, focal position, color controls and audio gain.
 - Subject detection, multi-sample template tracking, GrabCut segmentation mask with manual correction, smart reframing, tracked outline and anchored text. OpenCV activates automated analysis; manual fallback is always available.
 - Opening title, text watermark, draggable image watermark, safe-area guides and all five planned aspect-ratio presets.
@@ -40,7 +41,7 @@ For automatic subject detection, multi-sample tracking, and segmentation masks, 
 
 ## Workflow
 
-Import media → use `+` to add clips → arrange and trim the timeline → edit the selected clip in the Inspector → use **Render preview** for full compositing → **Export**. To replace sound, select a video clip, open **Audio**, choose **Unlink audio to A1**, highlight an imported music file, then choose **Replace with highlighted music**. The A1 item can be moved, trimmed, muted, or deleted without affecting the video, and the normal timeline Play button auditions it in sync. Outputs are also retained in `projects/exports/`.
+Import media → use `+` to add clips → arrange and trim the timeline → edit the selected clip in the Inspector → use **Render preview** for full compositing → **Export**. To add stickers, open **Stickers**, choose an emoji or highlight an imported image and add it to S1; then drag the S1 item in time, trim its edges, or drag it directly in the viewer. To replace sound, select a video clip, open **Audio**, choose **Unlink audio to A1**, highlight an imported music file, then choose **Replace with highlighted music**. The A1 item can be moved, trimmed, muted, or deleted without affecting the video, and the normal timeline Play button auditions it in sync. Outputs are also retained in `projects/exports/`.
 
 The live browser preview is designed for responsive editing and visibly approximates every color control, crop, keyframes, transforms and animated audio level. **Render preview** and final export use the same FFmpeg project renderer and are the parity reference. VDODesk detects formats the browser cannot decode—commonly HEVC camera footage in `.mov` files—and automatically creates an H.264/AAC proxy, switches the selected clip to it, and retries playback. Large files also receive a lower-resolution proxy in the background.
 
@@ -61,6 +62,6 @@ The live browser preview is designed for responsive editing and visibly approxim
 
 ## Validation and limitations
 
-Run `python3 -m unittest discover -s tests -v` (or `py -3 -m unittest discover -s tests -v` on Windows) to exercise workspace persistence, waveforms, proxies, freeze frames, tracking fallbacks, clip filters, color/effect rendering, audio gain/mute, detached A1 replacement, transitions, overlays, titles, watermarks, voiceover ducking and export compatibility. VDODesk is a feature-complete beta, not a signed Windows installer or notarized macOS application. Very large/high-resolution projects remain bounded by local RAM, storage and FFmpeg performance. Stabilization is FFmpeg `deshake`; tracking uses efficient sampled template tracking rather than a cloud AI service. Test short exports before committing important footage.
+Run `python3 -m unittest discover -s tests -v` (or `py -3 -m unittest discover -s tests -v` on Windows) to exercise workspace persistence, waveforms, proxies, freeze frames, tracking fallbacks, clip filters, color/effect rendering, timed sticker compositing, audio gain/mute, detached A1 replacement, transitions, overlays, titles, watermarks, voiceover ducking and export compatibility. VDODesk is a feature-complete beta, not a signed Windows installer or notarized macOS application. Very large/high-resolution projects remain bounded by local RAM, storage and FFmpeg performance. Stabilization is FFmpeg `deshake`; tracking uses efficient sampled template tracking rather than a cloud AI service. Test short exports before committing important footage.
 
 Distribution requires an independent review of FFmpeg codec/patent licensing, third-party component licenses, security hardening and Apple notarization requirements.

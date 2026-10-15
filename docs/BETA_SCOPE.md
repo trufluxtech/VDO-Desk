@@ -1,4 +1,4 @@
-# VDODesk 1.3.0 beta 1 scope and implementation map
+# VDODesk 1.4.0 beta 1 scope and implementation map
 
 The original roadmap is implemented in the retained local Python/browser/FFmpeg architecture.
 
@@ -9,6 +9,7 @@ The original roadmap is implemented in the retained local Python/browser/FFmpeg 
 | Advanced transforms/effects | Crop, position, rotate, zoom, mirror, opacity, stabilization and animated end keyframes |
 | Color controls | White balance, tint, hue, gamma, shadows/highlights, saturation/contrast/brightness and `.cube` LUTs |
 | Selected-clip filters | Ten presets with adjustable intensity and matching live-preview/FFmpeg export behavior |
+| Stickers and emoji | Dedicated S1 track with built-in emoji, imported image stickers, drag/trim timing, direct viewer placement, transforms, persistence, relinking and FFmpeg export |
 | Safe area and smart reframe | Safe-area overlay plus tracked focal points driving animated `zoompan` framing |
 | Tracking, masks and outlines | OpenCV detection/GrabCut, manual correction, sampled template path, outline and anchored text; dependency-free fallback |
 | Freeze frame and voiceover | FFmpeg still extraction, MediaRecorder capture, timed VO lane and sidechain ducking |
@@ -32,6 +33,8 @@ Version 1.2.0 beta 1 replaces the old project-music shortcut with true A1 editin
 Version 1.2.1 beta 1 adds synchronized browser playback for independent A1 audio. Timeline Play now starts, seeks, pauses and loops A1 items at their actual timeline positions, with live mute and level control; FFmpeg remains authoritative for rendered previews and exports.
 
 Version 1.3.0 beta 1 packages the same editor for Windows 10 and 11. Its launcher detects supported Python installations and project virtual environments, validates both FFmpeg executables, handles paths containing spaces and retains terminal errors. Separate helpers install the core prerequisites with Windows Package Manager and optional OpenCV into an isolated environment.
+
+Version 1.4.0 beta 1 adds the S1 sticker layer. Native emoji are converted in the browser to transparent PNG media, while imported PNG, JPEG and WebP images can also be used. Every sticker has independent timing, position, scale, rotation and opacity in live preview and FFmpeg export, with timeline drag/trim, direct viewer dragging, save/recovery, undo/redo and relinking support.
 
 ## Architecture boundary
 

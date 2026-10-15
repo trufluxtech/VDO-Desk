@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.0-beta.1
+
+- Added a dedicated S1 layer for timed stickers and emoji above the video tracks.
+- Added twelve built-in emoji choices rendered to portable transparent PNG assets using native macOS or Windows color emoji artwork.
+- Added imported PNG, JPEG and WebP image stickers from the existing Media library.
+- Added direct S1 drag positioning, edge trimming, viewer drag placement, and inspector controls for start, duration, X/Y position, scale, rotation and opacity.
+- Added sticker persistence to project save, autosave, recovery, undo/redo, asset relinking and deletion.
+- Added FFmpeg sticker compositing to rendered previews and final exports, including timing, position, alpha, scale and rotation.
+- Added an end-to-end render regression test proving a timed sticker changes the exported frame.
+
 ## 1.3.0-beta.1
 
 - Added a Windows 10/11 release package and documented native Windows startup flow.
